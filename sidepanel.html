@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Flow AI Launcher</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true">✦</span>
+          <span class="brand-name">Flow Launcher</span>
+        </div>
+        <span class="version-pill">v3.4</span>
+      </header>
+      <section class="workflow-card" aria-label="ตั้งค่าการสร้างภาพและวิดีโอ">
+        <div class="card-heading">
+          <div>
+            <p class="section-kicker">NEW CREATION</p>
+            <h2>ตั้งค่าโปรเจกต์</h2>
+          </div>
+          <span class="flow-chip">IMAGE <i>→</i> VIDEO</span>
+        </div>
+
+        <div class="automation-form">
+          <label class="field upload-field" for="imageInput">
+            <span class="field-heading">
+              <span class="step-number">01</span>
+              <span>
+                <strong>รูปภาพอ้างอิง</strong>
+                <small>PNG, JPG หรือ WEBP · ไม่เกิน 20 MB</small>
+              </span>
+            </span>
+            <span class="file-picker">
+              <span class="preview-shell">
+                <img id="imagePreview" alt="ตัวอย่างรูปภาพที่เลือก" hidden />
+                <span id="uploadIcon" class="upload-icon" aria-hidden="true"
+                  >＋</span
+                >
+              </span>
+              <span class="file-copy">
+                <strong id="fileName">เลือกรูปภาพ</strong>
+                <small>คลิกเพื่อเลือกไฟล์จากเครื่อง</small>
+              </span>
+              <span class="picker-arrow" aria-hidden="true">›</span>
+            </span>
+            <input
+              id="imageInput"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+            />
+          </label>
+
+          <label class="field" for="imagePrompt">
+            <span class="field-heading">
+              <span class="step-number">02</span>
+              <span>
+                <strong>Image Prompt</strong>
+                <small>อธิบายภาพที่ต้องการสร้าง</small>
+              </span>
+            </span>
+            <span class="input-shell">
+              <textarea
+                id="imagePrompt"
+                rows="4"
+                placeholder="เช่น เปลี่ยนสินค้าในภาพให้เป็นโฆษณาสไตล์มินิมอล…"
+              ></textarea>
+              <span class="input-tag">9:16 · NANO BANANA 2</span>
+            </span>
+          </label>
+
+          <label class="field" for="videoPrompt">
+            <span class="field-heading">
+              <span class="step-number">03</span>
+              <span>
+                <strong>Video Prompt</strong>
+                <small>กำหนดการเคลื่อนไหวและมุมกล้อง</small>
+              </span>
+            </span>
+            <span class="input-shell">
+              <textarea
+                id="videoPrompt"
+                rows="4"
+                placeholder="เช่น กล้องค่อย ๆ ซูมเข้า แสงนุ่มนวล เคลื่อนไหวสมจริง…"
+              ></textarea>
+              <span class="input-tag">VEO 3.1 LITE · 8S</span>
+            </span>
+          </label>
+
+          <label class="field compact-field" for="outputCount">
+            <span>
+              <strong>จำนวนรูปภาพ</strong>
+              <small>เลือกรูปที่จะสร้างในรอบแรก</small>
+            </span>
+            <select id="outputCount" aria-label="จำนวนรูปภาพที่ต้องการสร้าง">
+              <option value="1" selected>x1 — 1 รูป</option>
+              <option value="2">x2 — 2 รูป</option>
+              <option value="3">x3 — 3 รูป</option>
+              <option value="4">x4 — 4 รูป</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section id="statusCard" class="status-card" data-state="idle" hidden>
+        <div class="status-heading">
+          <span class="status-label"><i></i> PROCESS</span>
+          <span id="statusPercent">0%</span>
+        </div>
+        <div class="progress-track" aria-hidden="true">
+          <span id="statusProgress"></span>
+        </div>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+      </section>
+
+      <div class="action-dock">
+        <button id="startPrompt" class="primary-button" type="button">
+          <span>
+            <small>START AUTOMATION</small>
+            สร้างรูปและวิดีโอใน Flow
+          </span>
+          <span class="button-icon" aria-hidden="true">→</span>
+        </button>
+        <button
+          id="cancelAutomation"
+          class="cancel-button"
+          type="button"
+          hidden
+        >
+          <span>ยกเลิกการทำงาน</span>
+          <span aria-hidden="true">×</span>
+        </button>
+      </div>
+    </main>
+
+    <script src="sidepanel.js"></script>
+  </body>
+</html>
