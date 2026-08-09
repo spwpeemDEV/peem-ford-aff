@@ -1,23 +1,42 @@
-const AUTOMATION_TIMEOUT_MS = 3 * 60 * 1000;
 const AUTOMATION_BUILD = chrome.runtime.getManifest().version;
-const RETRY_INTERVAL_MS = 500;
-const CLICK_DELAY_MS = 200;
-const PROJECT_SETTLE_DELAY_MS = 3500;
-const UPLOAD_TIMEOUT_MS = 90 * 1000;
-const UPLOAD_HARD_SETTLE_MS = 25 * 1000;
-const INGREDIENT_SETTLE_DELAY_MS = 4500;
-const PROMPT_VERIFY_DELAY_MS = 1200;
-const IMAGE_GENERATION_TIMEOUT_MS = 5 * 60 * 1000;
-const IMAGE_GENERATION_MIN_WAIT_MS = 20 * 1000;
-const IMAGE_GENERATION_FALLBACK_MS = 2 * 60 * 1000;
 
 if (
+  !globalThis.FlowLauncherConfig ||
   !globalThis.FlowLauncherDom ||
   !globalThis.FlowLauncherMedia ||
   !globalThis.FlowLauncherRuntime
 ) {
   throw new Error("Flow Launcher modules were not loaded");
 }
+
+const {
+  AUTOMATION_TIMEOUT_MS,
+  CLICK_DELAY_MS,
+  IMAGE_GENERATION_FALLBACK_MS,
+  IMAGE_GENERATION_MIN_WAIT_MS,
+  IMAGE_GENERATION_TIMEOUT_MS,
+  INGREDIENT_SETTLE_DELAY_MS,
+  PROJECT_SETTLE_DELAY_MS,
+  PROMPT_VERIFY_DELAY_MS,
+  RETRY_INTERVAL_MS,
+  UPLOAD_HARD_SETTLE_MS,
+  UPLOAD_TIMEOUT_MS,
+} = globalThis.FlowLauncherConfig.TIMING;
+const {
+  ADD_REFERENCE: ADD_REFERENCE_LABELS,
+  ADD_TO_PROMPT: ADD_TO_PROMPT_LABELS,
+  DIRECT_UPLOAD: DIRECT_UPLOAD_LABELS,
+  ENTER_FLOW: ENTER_FLOW_LABELS,
+  FRAMES_MODE: FRAMES_MODE_LABELS,
+  IMAGE_MODE: IMAGE_MODE_LABELS,
+  IMAGE_MODEL: BANANA_2_LABELS,
+  NEW_PROJECT: NEW_PROJECT_LABELS,
+  PORTRAIT_RATIO: PORTRAIT_RATIO_LABELS,
+  VIDEO_DURATION: EIGHT_SECOND_LABELS,
+  VIDEO_MODE: VIDEO_MODE_LABELS,
+  VIDEO_MODEL: VEO_31_LITE_LABELS,
+} = globalThis.FlowLauncherConfig.LABELS;
+const { getOutputCountLabels } = globalThis.FlowLauncherConfig;
 
 const {
   activateElement,
@@ -37,58 +56,6 @@ const workflowState = globalThis.FlowLauncherRuntime.createWorkflowState({
   build: AUTOMATION_BUILD,
 });
 const WORKFLOW_STAGES = globalThis.FlowLauncherRuntime.STAGES;
-
-const NEW_PROJECT_LABELS = [
-  /new project/i,
-  /create project/i,
-  /สร้างโปรเจกต์ใหม่/i,
-  /โปรเจกต์ใหม่/i,
-];
-
-const ENTER_FLOW_LABELS = [
-  /create with google flow/i,
-  /เริ่มสร้างด้วย google flow/i,
-];
-
-const DIRECT_UPLOAD_LABELS = [
-  /upload image/i,
-  /upload media/i,
-  /upload file/i,
-  /อัปโหลดรูป/i,
-  /อัปโหลดไฟล์/i,
-];
-
-const ADD_REFERENCE_LABELS = [
-  /add ingredient/i,
-  /add reference/i,
-  /add media/i,
-  /add image/i,
-  /เพิ่มรูป/i,
-  /เพิ่มข้อมูลอ้างอิง/i,
-  /^add$/i,
-  /^เพิ่ม$/i,
-];
-
-const ADD_TO_PROMPT_LABELS = [
-  /^add to prompt$/i,
-  /เพิ่มลงใน prompt/i,
-  /เพิ่มไปยัง prompt/i,
-];
-
-const IMAGE_MODE_LABELS = [/^image$/i, /^รูปภาพ$/i];
-const VIDEO_MODE_LABELS = [/\bvideo\b/i, /วิดีโอ/i];
-const FRAMES_MODE_LABELS = [/^frames?$/i, /^เฟรม$/i];
-const PORTRAIT_RATIO_LABELS = [/^9\s*:\s*16$/i];
-const BANANA_2_LABELS = [/nano banana 2/i, /banana 2/i];
-const VEO_31_LITE_LABELS = [
-  /veo\s*3\.1\s*-?\s*lite\s*\[?lower priority\]?/i,
-  /veo\s*3\.1.*lite/i,
-];
-const EIGHT_SECOND_LABELS = [/^8\s*s$/i, /^8\s*sec(?:ond)?s?$/i];
-
-function getOutputCountLabels(outputCount) {
-  return [new RegExp(`^x\\s*${outputCount}$`, "i")];
-}
 
 let automationCancelled = false;
 
@@ -1402,7 +1369,7 @@ function dispatchPromptInputEvents(promptField, prompt) {
 // methods stack on top of each other without clearing between attempts.
 //
 // The reliable fix is to type through the Chrome DevTools Protocol via
-// chrome.debugger (see background.js "cdpInsertText"). CDP-injected input is
+// chrome.debugger (see service-worker.js "cdpInsertText"). CDP-injected input is
 // applied at the real browser input pipeline, the same layer tools like
 // Puppeteer/Selenium use, so the editor cannot distinguish it from genuine
 // user typing. This requires the "debugger" permission and briefly shows

@@ -1,24 +1,30 @@
 {
   "manifest_version": 3,
   "name": "Flow AI Launcher",
-  "version": "3.4.0",
+  "version": "3.5.0",
   "minimum_chrome_version": "116",
-  "description": "เปิด Google Flow จากแถบด้านข้างของ Chrome",
+  "description": "สร้างภาพและวิดีโอใน Google Flow จากแถบด้านข้างของ Chrome",
   "permissions": ["sidePanel", "storage", "unlimitedStorage", "debugger"],
   "host_permissions": ["https://labs.google/*"],
   "action": {
-    "default_title": "เปิด Flow AI Side Panel"
+    "default_title": "เปิด Flow AI Launcher"
   },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "src/background/service-worker.js"
   },
   "side_panel": {
-    "default_path": "sidepanel.html"
+    "default_path": "src/sidepanel/index.html"
   },
   "content_scripts": [
     {
       "matches": ["https://labs.google/fx/tools/flow*"],
-      "js": ["flow-runtime.js", "flow-dom.js", "flow-media.js", "flow-content.js"],
+      "js": [
+        "src/content/core/runtime.js",
+        "src/content/core/dom.js",
+        "src/content/flow/config.js",
+        "src/content/flow/media.js",
+        "src/content/flow/automation.js"
+      ],
       "run_at": "document_idle"
     }
   ]

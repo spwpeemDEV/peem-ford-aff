@@ -1,5 +1,6 @@
 const MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;
 
+const versionLabel = document.querySelector("#versionLabel");
 const startButton = document.querySelector("#startPrompt");
 const status = document.querySelector("#status");
 const statusCard = document.querySelector("#statusCard");
@@ -16,6 +17,8 @@ const cancelButton = document.querySelector("#cancelAutomation");
 
 let activeTabId = null;
 let imagePreviewUrl = null;
+
+versionLabel.textContent = `v${chrome.runtime.getManifest().version}`;
 
 function setStatus(message, { progress = null, state = "working" } = {}) {
   status.textContent = message;
