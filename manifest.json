@@ -4,8 +4,15 @@
   "version": "3.5.0",
   "minimum_chrome_version": "116",
   "description": "สร้างภาพและวิดีโอใน Google Flow จากแถบด้านข้างของ Chrome",
-  "permissions": ["sidePanel", "storage", "unlimitedStorage", "debugger"],
-  "host_permissions": ["https://labs.google/*"],
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "unlimitedStorage",
+    "debugger",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": ["https://labs.google/*", "https://*.tiktok.com/*"],
   "action": {
     "default_title": "เปิด Flow AI Launcher"
   },
@@ -25,6 +32,11 @@
         "src/content/flow/media.js",
         "src/content/flow/automation.js"
       ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.tiktok.com/*"],
+      "js": ["src/content/tiktok/scraper.js"],
       "run_at": "document_idle"
     }
   ]

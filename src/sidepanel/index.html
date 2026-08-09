@@ -133,6 +133,74 @@
           <span aria-hidden="true">×</span>
         </button>
       </div>
+      <!-- ซิงก์ข้อมูล TikTok -->
+      <div
+        style="
+          margin-bottom: 24px;
+          padding: 16px;
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 12px;
+        "
+      >
+        <div
+          style="
+            font-size: 11px;
+            font-weight: 600;
+            color: #a1a1aa;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+          "
+        >
+          TikTok Sync
+        </div>
+        <button
+          id="syncTiktokBtn"
+          type="button"
+          style="
+            width: 100%;
+            padding: 10px;
+            background: #3f3f46;
+            color: #fff;
+            border: 1px solid #52525b;
+            border-radius: 8px;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+          "
+        >
+          ดึง ID สินค้าจากหน้าปัจจุบัน
+        </button>
+        <div
+          id="tiktokIdOutput"
+          style="
+            width: 100%;
+            max-height: 350px;
+            overflow-y: auto;
+            margin-top: 12px;
+            padding: 8px;
+            background: #18181b;
+            border: 1px solid #3f3f46;
+            border-radius: 6px;
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+          "
+        ></div>
+        <div
+          id="tiktokSyncStatus"
+          style="
+            font-size: 12px;
+            color: #60a5fa;
+            margin-top: 8px;
+            text-align: center;
+            display: none;
+          "
+        ></div>
+      </div>
     </main>
 
     <script src="app.js"></script>
