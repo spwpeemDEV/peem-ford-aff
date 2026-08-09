@@ -14,6 +14,9 @@ const videoPrompt = document.querySelector("#videoPrompt");
 const clipCount = document.querySelector("#clipCount");
 const fileName = document.querySelector("#fileName");
 const cancelButton = document.querySelector("#cancelAutomation");
+const syncTiktokBtn = document.querySelector("#syncTiktokBtn");
+const tiktokIdOutput = document.querySelector("#tiktokIdOutput");
+const tiktokSyncStatus = document.querySelector("#tiktokSyncStatus");
 
 let activeTabId = null;
 let imagePreviewUrl = null;
@@ -203,6 +206,118 @@ chrome.runtime.onMessage.addListener((message) => {
     state: "error",
   });
   setAutomationIdle();
+});
+
+let globalItemCount = 0; // ตัวนับลำดับสินค้าทั้งหมด
+
+syncTiktokBtn.addEventListener("click", async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+  if (!tab.url.includes("tiktok.com")) {
+    alert("กรุณาเปิดหน้าเว็บ TikTok Studio (หน้าเลือกสินค้า) ก่อนใช้งาน");
+    return;
+  }
+
+  syncTiktokBtn.disabled = true;
+  syncTiktokBtn.textContent = "กำลังกวาดข้อมูลอัตโนมัติ...";
+  tiktokSyncStatus.style.display = "block";
+  tiktokSyncStatus.textContent = "กำลังเริ่มดึงข้อมูล...";
+  tiktokSyncStatus.style.color = "#60a5fa";
+
+  // ล้างหน้าจอและรีเซ็ตเลขลำดับเป็น 0
+  tiktokIdOutput.innerHTML = "";
+  tiktokIdOutput.style.display = "flex";
+  globalItemCount = 0;
+
+  // สั่งให้ Scraper เริ่มทำงาน
+  chrome.tabs.sendMessage(tab.id, { type: "START_PAGINATION_SCRAPE" }, (response) => {
+    syncTiktokBtn.disabled = false;
+    syncTiktokBtn.textContent = "ดึงข้อมูลสินค้าจากหน้าปัจจุบัน";
+
+    if (chrome.runtime.lastError) {
+      tiktokSyncStatus.textContent = "พบข้อผิดพลาด กรุณารีเฟรชหน้า TikTok แล้วลองใหม่";
+      tiktokSyncStatus.style.color = "#f87171";
+      return;
+    }
+
+    if (response && response.status === "done") {
+      tiktokSyncStatus.textContent = `ดึงข้อมูลเสร็จสมบูรณ์! ได้ทั้งหมด ${globalItemCount} รายการ`;
+      tiktokSyncStatus.style.color = "#4ade80";
+    }
+  });
+});
+
+// ฟังก์ชันรับข้อมูลทีละหน้า (Chunk) จาก scraper.js มาแสดงผล Real-time
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === "TIKTOK_SCRAPE_CHUNK") {
+    const products = message.data;
+
+    // อัปเดตสถานะให้ผู้ใช้เห็นว่ากำลังดึงถึงหน้าไหนแล้ว
+    tiktokSyncStatus.textContent = `กำลังกวาดหน้า ${message.page}... ได้มาแล้ว ${message.total} รายการ`;
+
+    // นำสินค้าหน้าล่าสุดมาวาดต่อท้าย
+    products.forEach((product) => {
+      globalItemCount++; // รันเลขลำดับ 1, 2, 3...
+
+      const item = document.createElement("div");
+      item.style.display = "flex";
+      item.style.alignItems = "center";
+      item.style.gap = "12px";
+      item.style.padding = "10px";
+      item.style.background = "#27272a";
+      item.style.borderRadius = "8px";
+
+      const num = document.createElement("div");
+      num.textContent = `${globalItemCount}.`;
+      num.style.color = "#a1a1aa";
+      num.style.fontSize = "14px";
+      num.style.fontWeight = "bold";
+      num.style.minWidth = "28px";
+      num.style.textAlign = "right";
+
+      const img = document.createElement("img");
+      img.src = product.imgUrl || "";
+      img.style.width = "48px";
+      img.style.height = "48px";
+      img.style.objectFit = "cover";
+      img.style.borderRadius = "6px";
+      img.style.backgroundColor = "#3f3f46";
+
+      const details = document.createElement("div");
+      details.style.flex = "1";
+      details.style.minWidth = "0";
+
+      const name = document.createElement("div");
+      // กรองเอา ID ที่อาจจะหลุดติดมากับชื่อออก
+      let cleanName = product.name.replace(product.id, '').trim();
+      name.textContent = cleanName;
+      name.title = cleanName;
+      name.style.fontSize = "13px";
+      name.style.color = "#e4e4e7";
+      name.style.fontWeight = "500";
+      name.style.whiteSpace = "nowrap";
+      name.style.overflow = "hidden";
+      name.style.textOverflow = "ellipsis";
+      name.style.marginBottom = "4px";
+
+      const id = document.createElement("div");
+      id.textContent = `ID: ${product.id}`;
+      id.style.fontSize = "11px";
+      id.style.color = "#60a5fa";
+
+      details.appendChild(name);
+      details.appendChild(id);
+
+      item.appendChild(num);
+      item.appendChild(img);
+      item.appendChild(details);
+
+      tiktokIdOutput.appendChild(item);
+    });
+
+    // ดัน Scroll bar ลงมาล่างสุดอัตโนมัติ เพื่อให้เห็นสินค้าใหม่ที่เพิ่งเข้ามา
+    tiktokIdOutput.scrollTop = tiktokIdOutput.scrollHeight;
+  }
 });
 
 window.addEventListener("unload", () => {
