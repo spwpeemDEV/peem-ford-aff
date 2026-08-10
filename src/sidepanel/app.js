@@ -11,7 +11,7 @@ const imagePreview = document.querySelector("#imagePreview");
 const uploadIcon = document.querySelector("#uploadIcon");
 const imagePrompt = document.querySelector("#imagePrompt");
 const videoPrompt = document.querySelector("#videoPrompt");
-const outputCount = document.querySelector("#outputCount");
+const clipCount = document.querySelector("#clipCount");
 const fileName = document.querySelector("#fileName");
 const cancelButton = document.querySelector("#cancelAutomation");
 const syncTiktokBtn = document.querySelector("#syncTiktokBtn");
@@ -86,7 +86,7 @@ startButton.addEventListener("click", async () => {
   const [imageFile] = imageInput.files;
   const prompt = imagePrompt.value.trim();
   const requestedVideoPrompt = videoPrompt.value.trim();
-  const requestedOutputCount = Number(outputCount.value);
+  const requestedClipCount = Number(clipCount.value);
 
   if (!imageFile) {
     setStatus("กรุณาเลือกรูปภาพอ้างอิง", { state: "error" });
@@ -123,8 +123,8 @@ startButton.addEventListener("click", async () => {
       [jobKey]: {
         prompt,
         videoPrompt: requestedVideoPrompt,
-        outputCount: [1, 2, 3, 4].includes(requestedOutputCount)
-          ? requestedOutputCount
+        clipCount: [1, 2, 3, 4].includes(requestedClipCount)
+          ? requestedClipCount
           : 1,
         image: {
           name: imageFile.name,

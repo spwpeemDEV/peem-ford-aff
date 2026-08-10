@@ -14,6 +14,7 @@ const {
   CLICK_DELAY_MS,
   IMAGE_GENERATION_FALLBACK_MS,
   IMAGE_GENERATION_MIN_WAIT_MS,
+  IMAGE_GENERATION_REPEAT_MIN_WAIT_MS,
   IMAGE_GENERATION_TIMEOUT_MS,
   INGREDIENT_SETTLE_DELAY_MS,
   PROJECT_SETTLE_DELAY_MS,
@@ -21,6 +22,9 @@ const {
   RETRY_INTERVAL_MS,
   UPLOAD_HARD_SETTLE_MS,
   UPLOAD_TIMEOUT_MS,
+  VIDEO_GENERATION_FALLBACK_MS,
+  VIDEO_GENERATION_MIN_WAIT_MS,
+  VIDEO_GENERATION_TIMEOUT_MS,
 } = globalThis.FlowLauncherConfig.TIMING;
 const {
   ADD_REFERENCE: ADD_REFERENCE_LABELS,
@@ -48,7 +52,6 @@ const {
   getSelectedState,
   interactiveSelector: INTERACTIVE_SELECTOR,
   isVisible,
-  matchesControlText,
   normalizeLabel,
   promoteToClickableControl,
 } = globalThis.FlowLauncherDom.createDomTools({ clickDelayMs: CLICK_DELAY_MS });
@@ -58,6 +61,21 @@ const workflowState = globalThis.FlowLauncherRuntime.createWorkflowState({
 const WORKFLOW_STAGES = globalThis.FlowLauncherRuntime.STAGES;
 
 let automationCancelled = false;
+
+function getClipProgress(clipIndex, clipCount, phase) {
+  const workflowStart = 15;
+  const workflowEnd = 98;
+  const normalizedPhase = Math.max(0, Math.min(1, phase));
+  return Math.round(
+    workflowStart +
+      ((clipIndex + normalizedPhase) / Math.max(1, clipCount)) *
+        (workflowEnd - workflowStart),
+  );
+}
+
+function getClipLabel(clipIndex, clipCount) {
+  return `คลิป ${clipIndex + 1}/${clipCount}`;
+}
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type !== "cancelFlowAutomation") {
@@ -105,10 +123,35 @@ function findPromptField() {
   return scored[0]?.score >= 0 ? scored[0].element : null;
 }
 
-function findSettingsButton() {
+function isPromptRegionControl(element, promptField) {
+  if (!promptField || !isVisible(promptField)) {
+    return true;
+  }
+
+  const promptContainer = getPromptDropTarget(promptField);
+  return (
+    promptContainer.contains(element) ||
+    isInsideRect(element, getPromptVicinity(promptField))
+  );
+}
+
+function isExcludedSettingsControl(element) {
+  return Boolean(
+    element.closest(
+      "#flow-launcher-status, [role='dialog'], nav, aside, [role='navigation']",
+    ),
+  );
+}
+
+function findSettingsButton(promptField = null) {
   const candidates = [
     ...document.querySelectorAll(INTERACTIVE_SELECTOR),
-  ].filter((element) => isVisible(element));
+  ].filter(
+    (element) =>
+      isVisible(element) &&
+      !isExcludedSettingsControl(element) &&
+      isPromptRegionControl(element, promptField),
+  );
 
   const interactiveMatch = candidates
     .map((element) => {
@@ -123,6 +166,13 @@ function findSettingsButton() {
       if (/generate|สร้าง/i.test(label)) {
         score -= 100;
       }
+      const rect = element.getBoundingClientRect();
+      if (rect.width >= 72 && rect.width <= 360) {
+        score += 25;
+      }
+      if (rect.bottom >= window.innerHeight * 0.65) {
+        score += 20;
+      }
       return { element, score };
     })
     .sort((left, right) => right.score - left.score)
@@ -135,6 +185,12 @@ function findSettingsButton() {
   const fallbackMatch = [...document.querySelectorAll("body *")]
     .filter((element) => {
       if (!isVisible(element)) {
+        return false;
+      }
+      if (
+        isExcludedSettingsControl(element) ||
+        !isPromptRegionControl(element, promptField)
+      ) {
         return false;
       }
       const label = getElementLabels(element).join(" ");
@@ -195,13 +251,26 @@ async function waitForSettingsControls(outputCount) {
   return null;
 }
 
-async function configureImageSettings(outputCount = 1) {
+async function configureImageSettings(
+  outputCount = 1,
+  fallbackPromptField = null,
+  allowExistingSummary = false,
+) {
   if (automationCancelled) {
     return false;
   }
-  const settingsButton = findSettingsButton();
+  const settingsButton = findSettingsButton(fallbackPromptField);
   if (!settingsButton) {
     return false;
+  }
+
+  const existingSummary = getElementLabels(settingsButton).join(" ");
+  if (
+    allowExistingSummary &&
+    /nano banana 2|banana 2/i.test(existingSummary) &&
+    new RegExp(`x\\s*${outputCount}`, "i").test(existingSummary)
+  ) {
+    return true;
   }
 
   const outputCountLabels = getOutputCountLabels(outputCount);
@@ -301,7 +370,9 @@ async function configureImageSettings(outputCount = 1) {
     await delay(350);
   }
 
-  const summary = getElementLabels(findSettingsButton() || settingsButton).join(" ");
+  const summary = getElementLabels(
+    findSettingsButton(fallbackPromptField) || settingsButton,
+  ).join(" ");
   return (
     /nano banana 2|banana 2/i.test(summary) &&
     new RegExp(`x\\s*${outputCount}`, "i").test(summary)
@@ -384,7 +455,7 @@ function findVideoModeSibling(imageModeButton, settingsPanel) {
   return null;
 }
 
-async function configureVideoSettings(fallbackPromptField = null) {
+async function configureVideoSettings(fallbackPromptField = null, statusContext = {}) {
   if (automationCancelled) {
     return false;
   }
@@ -400,16 +471,17 @@ async function configureVideoSettings(fallbackPromptField = null) {
       return false;
     }
     showAutomationStatus(
-      `รอ composer พร้อม แล้วกำลังกดชิปตั้งค่า… (${attempt + 1}/24)`,
+      `${statusContext.clipLabel ? `${statusContext.clipLabel} · ` : ""}รอ composer พร้อม แล้วกำลังกดชิปตั้งค่า… (${attempt + 1}/24)`,
       "working",
-      70 + Math.min(3, Math.floor(attempt / 8)),
+      statusContext.progress ?? null,
+      WORKFLOW_STAGES.VIDEO_SETUP,
     );
 
     const freshSettingsLabel =
       findVisibleTextElement(BANANA_2_LABELS) ||
       findVisibleTextElement([/video.*(?:8\s*s|x\s*1)/i]);
     settingsButton =
-      findSettingsButton() ||
+      findSettingsButton(fallbackPromptField) ||
       (freshSettingsLabel
         ? promoteToClickableControl(freshSettingsLabel, document)
         : null);
@@ -431,14 +503,19 @@ async function configureVideoSettings(fallbackPromptField = null) {
   if (!controls) {
     throw new Error("VIDEO_STAGE:OPEN_SETTINGS");
   }
-  settingsButton = findSettingsButton() || settingsButton;
+  settingsButton = findSettingsButton(fallbackPromptField) || settingsButton;
 
   const settingsPanel = findCommonContainer([
     controls.imageModeButton,
     controls.portraitButton,
     controls.outputCountButton,
   ]);
-  showAutomationStatus("เปิดตั้งค่าแล้ว กำลังสลับ Image → Video…", "working", 74);
+  showAutomationStatus(
+    `${statusContext.clipLabel ? `${statusContext.clipLabel} · ` : ""}เปิดตั้งค่าแล้ว กำลังสลับ Image → Video…`,
+    "working",
+    statusContext.progress ?? null,
+    WORKFLOW_STAGES.VIDEO_SETUP,
+  );
   const videoModeButton =
     findVideoModeSibling(controls.imageModeButton, settingsPanel) ||
     findTextControl(VIDEO_MODE_LABELS, settingsPanel) ||
@@ -512,13 +589,15 @@ async function configureVideoSettings(fallbackPromptField = null) {
   await activateElement(singleOutputButton);
   await delay(400);
 
-  settingsButton = findSettingsButton() || settingsButton;
+  settingsButton = findSettingsButton(fallbackPromptField) || settingsButton;
   if (findTextControl(FRAMES_MODE_LABELS, settingsPanel)) {
     await activateElement(settingsButton);
     await delay(350);
   }
 
-  const summary = getElementLabels(findSettingsButton() || settingsButton).join(" ");
+  const summary = getElementLabels(
+    findSettingsButton(fallbackPromptField) || settingsButton,
+  ).join(" ");
   if (!/video|วิดีโอ/i.test(summary) || !/8\s*s/i.test(summary) || !/x\s*1/i.test(summary)) {
     throw new Error("VIDEO_STAGE:VERIFY_SETTINGS");
   }
@@ -1008,7 +1087,7 @@ function findPickerThumbnail(picker) {
     })[0];
 }
 
-async function openPromptMediaPicker(promptField, imageName) {
+async function openPromptMediaPicker(promptField, imageName, requireNamedAsset = false) {
   const addButton = findPromptAddButton(promptField);
   if (!addButton) {
     return null;
@@ -1024,6 +1103,9 @@ async function openPromptMediaPicker(promptField, imageName) {
   const baseName = imageName.replace(/\.[^.]+$/, "");
   const namePattern = new RegExp(escapeRegExp(baseName), "i");
   const namedAsset = findTextControl([namePattern], picker);
+  if (requireNamedAsset && !namedAsset) {
+    return null;
+  }
   const assetToSelect = namedAsset || findPickerThumbnail(picker);
   if (assetToSelect) {
     await activateElement(assetToSelect);
@@ -1050,7 +1132,11 @@ async function addAssetAsIngredient(imageName, promptField) {
   if (automationCancelled) {
     return null;
   }
-  const addToPromptAction = await openPromptMediaPicker(promptField, imageName);
+  const addToPromptAction = await openPromptMediaPicker(
+    promptField,
+    imageName,
+    true,
+  );
   if (!addToPromptAction) {
     return null;
   }
@@ -1217,59 +1303,134 @@ function hasGenerationActivity() {
   });
 }
 
-async function waitForGeneratedImageReady(previousSignatures, fallbackPromptField) {
+async function waitForNewGeneratedMedia({
+  previousSignatures,
+  fallbackPromptField,
+  timeoutMs,
+  minimumWaitMs,
+  fallbackWaitMs,
+  progressRange,
+  statusMessage,
+  stage,
+  requireGenerationCycle = false,
+  unobservedCycleMinWaitMs = minimumWaitMs,
+}) {
   const startedAt = Date.now();
   let stableReadyChecks = 0;
+  let lastNewSignatureKey = "";
+  let generationActivityObserved = false;
   let lastReportedProgress = -1;
+  const [progressStart, progressEnd] = progressRange;
 
-  while (!automationCancelled && Date.now() - startedAt < IMAGE_GENERATION_TIMEOUT_MS) {
+  while (!automationCancelled && Date.now() - startedAt < timeoutMs) {
     const elapsed = Date.now() - startedAt;
     const estimatedProgress = Math.min(
-      60,
-      52 + Math.floor((elapsed / IMAGE_GENERATION_FALLBACK_MS) * 8),
+      progressEnd,
+      progressStart +
+        Math.floor(
+          (elapsed / fallbackWaitMs) * (progressEnd - progressStart),
+        ),
     );
     if (estimatedProgress !== lastReportedProgress) {
       lastReportedProgress = estimatedProgress;
       showAutomationStatus(
-        "กำลังรอ AI สร้างรูปให้เสร็จ…",
+        statusMessage,
         "working",
         estimatedProgress,
+        stage,
       );
     }
     const active = hasGenerationActivity();
+    generationActivityObserved ||= active;
     const promptField = getUsablePromptField(fallbackPromptField);
     const signatures = getWorkspaceMediaSignatures(promptField);
-    const hasNewMedia = [...signatures].some((signature) => !previousSignatures.has(signature));
-    const canAcceptReadyState = elapsed >= IMAGE_GENERATION_MIN_WAIT_MS;
+    const newSignatures = new Set(
+      [...signatures].filter((signature) => !previousSignatures.has(signature)),
+    );
+    const hasNewMedia = newSignatures.size > 0;
+    const newSignatureKey = [...newSignatures].sort().join("\n");
+    const canAcceptReadyState = elapsed >= minimumWaitMs;
+    const generationCycleReady =
+      !requireGenerationCycle ||
+      generationActivityObserved ||
+      elapsed >= unobservedCycleMinWaitMs;
 
-    if (canAcceptReadyState && !active && hasNewMedia) {
-      stableReadyChecks += 1;
-      if (stableReadyChecks >= 3) {
+    if (
+      canAcceptReadyState &&
+      generationCycleReady &&
+      !active &&
+      hasNewMedia
+    ) {
+      if (newSignatureKey === lastNewSignatureKey) {
+        stableReadyChecks += 1;
+      } else {
+        lastNewSignatureKey = newSignatureKey;
+        stableReadyChecks = 1;
+      }
+      if (stableReadyChecks >= (requireGenerationCycle ? 5 : 3)) {
         return {
           signatures,
-          newSignatures: new Set(
-            [...signatures].filter((signature) => !previousSignatures.has(signature)),
-          ),
+          newSignatures,
         };
       }
     } else {
       stableReadyChecks = 0;
+      if (!hasNewMedia) {
+        lastNewSignatureKey = "";
+      }
     }
 
     // Some Flow builds draw the result into an existing canvas and expose no
     // generation status in the DOM. After a generous wait, continue to the
     // Recent media picker, whose Add to Prompt button is the final readiness check.
-    if (elapsed >= IMAGE_GENERATION_FALLBACK_MS && !active && hasNewMedia) {
+    if (elapsed >= fallbackWaitMs && !active && hasNewMedia) {
       return {
         signatures,
-        newSignatures: new Set(
-          [...signatures].filter((signature) => !previousSignatures.has(signature)),
-        ),
+        newSignatures,
       };
     }
     await delay(1000);
   }
   return false;
+}
+
+function waitForGeneratedImageReady(
+  previousSignatures,
+  fallbackPromptField,
+  progressRange = [52, 60],
+  clipLabel = "",
+  requireGenerationCycle = false,
+) {
+  return waitForNewGeneratedMedia({
+    previousSignatures,
+    fallbackPromptField,
+    timeoutMs: IMAGE_GENERATION_TIMEOUT_MS,
+    minimumWaitMs: IMAGE_GENERATION_MIN_WAIT_MS,
+    fallbackWaitMs: IMAGE_GENERATION_FALLBACK_MS,
+    progressRange,
+    statusMessage: `${clipLabel ? `${clipLabel} · ` : ""}กำลังรอ AI สร้างรูปให้เสร็จ…`,
+    stage: WORKFLOW_STAGES.IMAGE_GENERATION,
+    requireGenerationCycle,
+    unobservedCycleMinWaitMs: IMAGE_GENERATION_REPEAT_MIN_WAIT_MS,
+  });
+}
+
+function waitForGeneratedVideoReady(
+  previousSignatures,
+  fallbackPromptField,
+  progressRange,
+  clipLabel,
+) {
+  return waitForNewGeneratedMedia({
+    previousSignatures,
+    fallbackPromptField,
+    timeoutMs: VIDEO_GENERATION_TIMEOUT_MS,
+    minimumWaitMs: VIDEO_GENERATION_MIN_WAIT_MS,
+    fallbackWaitMs: VIDEO_GENERATION_FALLBACK_MS,
+    progressRange,
+    statusMessage: `${clipLabel} · กำลังรอวิดีโอสร้างให้เสร็จ…`,
+    stage: WORKFLOW_STAGES.WAIT_VIDEO_RESULT,
+  });
 }
 
 async function attachLatestGeneratedImage(
@@ -1281,6 +1442,7 @@ async function attachLatestGeneratedImage(
   if (!picker) {
     return null;
   }
+
   await delay(1000);
 
   let latestAsset = null;
@@ -1864,11 +2026,25 @@ async function generateVideoFromLatestImage(
   fallbackPromptField,
   mediaSignaturesBeforeImageGeneration,
   originalImageName,
+  clipIndex = 0,
+  clipCount = 1,
 ) {
-  showAutomationStatus("กำลังรอ AI สร้างรูปให้เสร็จ…", "working", 52);
+  const clipLabel = getClipLabel(clipIndex, clipCount);
+  showAutomationStatus(
+    `${clipLabel} · กำลังรอ AI สร้างรูปให้เสร็จ…`,
+    "working",
+    getClipProgress(clipIndex, clipCount, 0.3),
+    WORKFLOW_STAGES.IMAGE_GENERATION,
+  );
   const generatedMedia = await waitForGeneratedImageReady(
     mediaSignaturesBeforeImageGeneration,
     fallbackPromptField,
+    [
+      getClipProgress(clipIndex, clipCount, 0.32),
+      getClipProgress(clipIndex, clipCount, 0.46),
+    ],
+    clipLabel,
+    clipIndex > 0,
   );
   if (!generatedMedia || automationCancelled) {
     throw new Error("VIDEO_STAGE:WAIT_IMAGE_RESULT");
@@ -1880,9 +2056,9 @@ async function generateVideoFromLatestImage(
   }
 
   showAutomationStatus(
-    "รูปพร้อมแล้ว กำลังกด + และนำรูปใหม่เข้า Prompt…",
+    `${clipLabel} · รูปพร้อมแล้ว กำลังนำรูปใหม่เข้า Prompt…`,
     "working",
-    62,
+    getClipProgress(clipIndex, clipCount, 0.5),
     WORKFLOW_STAGES.GENERATED_MEDIA,
   );
   await attachLatestGeneratedImage(
@@ -1897,12 +2073,15 @@ async function generateVideoFromLatestImage(
   await delay(1500);
 
   showAutomationStatus(
-    "กำลังเลือก Video · Frames · 9:16 · Veo 3.1 Lite · 8s · x1…",
+    `${clipLabel} · กำลังเลือก Video · Frames · 9:16 · Veo 3.1 Lite · 8s · x1…`,
     "working",
-    68,
+    getClipProgress(clipIndex, clipCount, 0.6),
     WORKFLOW_STAGES.VIDEO_SETUP,
   );
-  const videoSettingsReady = await configureVideoSettings(promptField);
+  const videoSettingsReady = await configureVideoSettings(promptField, {
+    clipLabel,
+    progress: getClipProgress(clipIndex, clipCount, 0.6),
+  });
   if (!videoSettingsReady) {
     throw new Error("VIDEO_STAGE:CONFIGURE_SETTINGS");
   }
@@ -1913,9 +2092,9 @@ async function generateVideoFromLatestImage(
   }
   await delay(750);
   showAutomationStatus(
-    "กำลังใส่ Video Prompt…",
+    `${clipLabel} · กำลังใส่ Video Prompt…`,
     "working",
-    84,
+    getClipProgress(clipIndex, clipCount, 0.69),
     WORKFLOW_STAGES.VIDEO_PROMPT,
   );
   const videoPromptReady = await fillPromptAndVerify(videoPrompt, promptField);
@@ -1923,13 +2102,137 @@ async function generateVideoFromLatestImage(
     throw new Error("VIDEO_STAGE:FILL_VIDEO_PROMPT");
   }
 
+  const mediaSignaturesBeforeVideoGeneration = getWorkspaceMediaSignatures(promptField);
   showAutomationStatus(
-    "กำลังกด Enter เพื่อเริ่มสร้างวิดีโอ…",
+    `${clipLabel} · กำลังกด Enter เพื่อเริ่มสร้างวิดีโอ…`,
     "working",
-    94,
+    getClipProgress(clipIndex, clipCount, 0.76),
     WORKFLOW_STAGES.VIDEO_GENERATION,
   );
-  return submitPromptForGeneration(promptField);
+  const submitted = await submitPromptForGeneration(promptField);
+  return submitted
+    ? { mediaSignaturesBeforeVideoGeneration, promptField }
+    : null;
+}
+
+async function runClipSequence(job, initialPromptField, clipCount) {
+  let promptField = initialPromptField;
+
+  for (let clipIndex = 0; clipIndex < clipCount; clipIndex += 1) {
+    if (automationCancelled) {
+      return false;
+    }
+
+    const clipLabel = getClipLabel(clipIndex, clipCount);
+
+    if (clipIndex > 0) {
+      promptField = await waitForUsablePromptField(promptField, 60 * 1000);
+      if (!promptField) {
+        throw new Error(`CLIP_STAGE:FIND_PROMPT_${clipIndex + 1}`);
+      }
+
+      showAutomationStatus(
+        `${clipLabel} · กำลังตั้งค่าตัวสร้างเป็น Image · 9:16 · Nano Banana 2 · x1…`,
+        "working",
+        getClipProgress(clipIndex, clipCount, 0.02),
+        WORKFLOW_STAGES.IMAGE_SETUP,
+      );
+      const imageSettingsReady = await configureImageSettings(
+        1,
+        promptField,
+        true,
+      );
+      if (!imageSettingsReady) {
+        throw new Error(`CLIP_STAGE:CONFIGURE_IMAGE_${clipIndex + 1}`);
+      }
+
+      promptField = await waitForUsablePromptField(promptField, 30 * 1000);
+      if (!promptField) {
+        throw new Error(`CLIP_STAGE:FIND_PROMPT_AFTER_IMAGE_${clipIndex + 1}`);
+      }
+
+      showAutomationStatus(
+        `${clipLabel} · กำลังนำรูปต้นฉบับกลับเข้า Prompt…`,
+        "working",
+        getClipProgress(clipIndex, clipCount, 0.08),
+        WORKFLOW_STAGES.SOURCE_MEDIA,
+      );
+      const promptWithOriginal = await addAssetAsIngredient(
+        job.image.name,
+        promptField,
+      );
+      if (!promptWithOriginal) {
+        throw new Error(`CLIP_STAGE:ADD_ORIGINAL_${clipIndex + 1}`);
+      }
+      promptField = promptWithOriginal;
+      await delay(1000);
+    }
+
+    showAutomationStatus(
+      `${clipLabel} · กำลังใส่ Image Prompt…`,
+      "working",
+      getClipProgress(clipIndex, clipCount, 0.13),
+      WORKFLOW_STAGES.IMAGE_PROMPT,
+    );
+    const imagePromptReady = await fillPromptAndVerify(job.prompt, promptField);
+    if (!imagePromptReady) {
+      throw new Error(`CLIP_STAGE:FILL_IMAGE_PROMPT_${clipIndex + 1}`);
+    }
+
+    const mediaBeforeImageGeneration = getWorkspaceMediaSignatures(promptField);
+    showAutomationStatus(
+      `${clipLabel} · กำลังเริ่มสร้างรูป AI ใหม่…`,
+      "working",
+      getClipProgress(clipIndex, clipCount, 0.22),
+      WORKFLOW_STAGES.IMAGE_GENERATION,
+    );
+    const imageSubmitted = await submitPromptForGeneration(promptField);
+    if (!imageSubmitted) {
+      throw new Error(`CLIP_STAGE:SUBMIT_IMAGE_${clipIndex + 1}`);
+    }
+
+    const videoRun = await generateVideoFromLatestImage(
+      job.videoPrompt,
+      promptField,
+      mediaBeforeImageGeneration,
+      job.image.name,
+      clipIndex,
+      clipCount,
+    );
+    if (!videoRun) {
+      throw new Error(`CLIP_STAGE:SUBMIT_VIDEO_${clipIndex + 1}`);
+    }
+
+    const videoReady = await waitForGeneratedVideoReady(
+      videoRun.mediaSignaturesBeforeVideoGeneration,
+      videoRun.promptField,
+      [
+        getClipProgress(clipIndex, clipCount, 0.8),
+        getClipProgress(clipIndex, clipCount, 0.98),
+      ],
+      clipLabel,
+    );
+    if (!videoReady) {
+      throw new Error(`CLIP_STAGE:WAIT_VIDEO_RESULT_${clipIndex + 1}`);
+    }
+
+    showAutomationStatus(
+      `${clipLabel} เสร็จแล้ว${clipIndex + 1 < clipCount ? " · เตรียมเริ่มคลิปถัดไป…" : ""}`,
+      "working",
+      getClipProgress(clipIndex, clipCount, 1),
+      WORKFLOW_STAGES.WAIT_VIDEO_RESULT,
+    );
+
+    if (clipIndex + 1 < clipCount) {
+      promptField = await waitForUsablePromptField(videoRun.promptField, 60 * 1000);
+      if (!promptField) {
+        throw new Error(`CLIP_STAGE:PREPARE_NEXT_${clipIndex + 2}`);
+      }
+      await delay(1500);
+    }
+  }
+
+  return true;
 }
 
 function showAutomationStatus(
@@ -2083,9 +2386,9 @@ async function automateProjectCreation() {
     throw new Error("Flow automation data is incomplete");
   }
   workflowState.reset();
-  const requestedOutputCount = Number(job.outputCount);
-  const outputCount = [1, 2, 3, 4].includes(requestedOutputCount)
-    ? requestedOutputCount
+  const requestedClipCount = Number(job.clipCount ?? job.outputCount);
+  const clipCount = [1, 2, 3, 4].includes(requestedClipCount)
+    ? requestedClipCount
     : 1;
 
   showAutomationStatus(
@@ -2108,7 +2411,7 @@ async function automateProjectCreation() {
     if (!clickedNewProject && newProjectButton) {
       clickedNewProject = true;
       await activateElement(newProjectButton);
-      showAutomationStatus("สร้างโปรเจกต์แล้ว รอหน้าโหลดให้พร้อม…", "working", 8);
+      showAutomationStatus("สร้างโปรเจกต์แล้ว รอหน้าโหลดให้พร้อม…", "working", 5);
       await delay(PROJECT_SETTLE_DELAY_MS);
       continue;
     }
@@ -2117,7 +2420,7 @@ async function automateProjectCreation() {
     if (promptField) {
       if (!editorSeenAt) {
         editorSeenAt = Date.now();
-        showAutomationStatus("พบหน้าโปรเจกต์แล้ว รอระบบนิ่งสักครู่…", "working", 12);
+        showAutomationStatus("พบหน้าโปรเจกต์แล้ว รอระบบนิ่งสักครู่…", "working", 8);
       }
 
       const remainingSettleTime = PROJECT_SETTLE_DELAY_MS - (Date.now() - editorSeenAt);
@@ -2128,12 +2431,12 @@ async function automateProjectCreation() {
 
       if (!settingsConfigured) {
         showAutomationStatus(
-          `กำลังเลือก Image · 9:16 · Nano Banana 2 · x${outputCount}…`,
+          "กำลังเลือก Image · 9:16 · Nano Banana 2 · x1…",
           "working",
-          18,
+          10,
           WORKFLOW_STAGES.IMAGE_SETUP,
         );
-        settingsConfigured = await configureImageSettings(outputCount);
+        settingsConfigured = await configureImageSettings(1, promptField);
         if (!settingsConfigured) {
           await delay(RETRY_INTERVAL_MS);
           continue;
@@ -2141,7 +2444,7 @@ async function automateProjectCreation() {
         showAutomationStatus(
           "ตั้งค่าภาพเรียบร้อย กำลังเตรียมอัปโหลด…",
           "working",
-          25,
+          12,
           WORKFLOW_STAGES.SOURCE_MEDIA,
         );
         await delay(750);
@@ -2149,51 +2452,34 @@ async function automateProjectCreation() {
 
       if (!imageAttached && !triedPickerUpload) {
         triedPickerUpload = true;
-        showAutomationStatus("กำลังกด + เพื่อเปิดคลังสื่อและอัปโหลดรูป…", "working", 30);
+        showAutomationStatus("กำลังกด + เพื่อเปิดคลังสื่อและอัปโหลดรูป…", "working", 13);
         const promptViaPicker = await attachImageViaAddToPrompt(promptField, job.image);
 
         if (promptViaPicker) {
           imageAttached = true;
-          showAutomationStatus("เพิ่ม Ingredient แล้ว รอช่อง Prompt ให้พร้อม…", "working", 36);
+          showAutomationStatus(
+            `เพิ่มรูปต้นฉบับแล้ว เตรียมสร้าง ${clipCount} คลิป…`,
+            "working",
+            14,
+            WORKFLOW_STAGES.SOURCE_MEDIA,
+          );
           await delay(1000);
-          showAutomationStatus(
-            "กำลังใส่และตรวจสอบ Image Prompt…",
-            "working",
-            41,
-            WORKFLOW_STAGES.IMAGE_PROMPT,
-          );
-          const promptWasFilled = await fillPromptAndVerify(job.prompt, promptViaPicker);
-          if (!promptWasFilled) {
-            throw new Error("Image prompt did not remain in the prompt field");
-          }
-          const mediaBeforeImageGeneration = getWorkspaceMediaSignatures(promptViaPicker);
-          showAutomationStatus(
-            "กำลังกด Enter เพื่อเริ่มสร้างรูป…",
-            "working",
-            47,
-            WORKFLOW_STAGES.IMAGE_GENERATION,
-          );
-          const submitted = await submitPromptForGeneration(promptViaPicker);
-          if (!submitted) {
-            throw new Error("Could not start image generation");
-          }
-          const videoSubmitted = await generateVideoFromLatestImage(
-            job.videoPrompt,
+          const clipsCompleted = await runClipSequence(
+            job,
             promptViaPicker,
-            mediaBeforeImageGeneration,
-            job.image.name,
+            clipCount,
           );
-          if (!videoSubmitted) {
-            throw new Error("Could not complete image-to-video generation");
+          if (!clipsCompleted) {
+            throw new Error("Could not complete clip sequence");
           }
           showAutomationStatus(
-            `สร้างรูป x${outputCount} แล้ว และเริ่มสร้างวิดีโอ Veo 3.1 Lite · 8s · x1 แล้ว`,
+            `สร้างวิดีโอครบ ${clipCount} คลิปแล้ว`,
             "success",
             100,
           );
           await finishAutomation(
             "prepared",
-            `สร้างรูป x${outputCount} แล้ว และเริ่มสร้างวิดีโอ 9:16 · Veo 3.1 Lite · 8s · x1 แล้ว`,
+            `สร้างรูป AI ใหม่และวิดีโอ 9:16 ครบ ${clipCount} คลิปแล้ว`,
           );
           setTimeout(() => document.querySelector("#flow-launcher-status")?.remove(), 5000);
           return;
@@ -2210,7 +2496,7 @@ async function automateProjectCreation() {
           const promptStateBeforeUpload = capturePromptState(promptField);
           attachImage(fileInput, job.image);
           imageAttached = true;
-          showAutomationStatus("กำลังอัปโหลดรูปภาพ กรุณารอสักครู่…", "working", 32);
+          showAutomationStatus("กำลังอัปโหลดรูปภาพ กรุณารอสักครู่…", "working", 13);
 
           const uploadOutcome = await waitForUploadOutcome(
             job.image.name,
@@ -2223,12 +2509,12 @@ async function automateProjectCreation() {
 
           let promptAfterIngredient;
           if (uploadOutcome.type === "ingredient") {
-            showAutomationStatus("รูปเข้า Prompt แล้ว รอช่องข้อความให้พร้อม…", "working", 36);
+            showAutomationStatus("รูปเข้า Prompt แล้ว รอช่องข้อความให้พร้อม…", "working", 14);
             await delay(INGREDIENT_SETTLE_DELAY_MS);
             promptAfterIngredient =
               uploadOutcome.promptField || getUsablePromptField(promptField);
           } else {
-            showAutomationStatus("อัปโหลดเสร็จแล้ว กำลังกด + เพื่อเลือก Add to Prompt…", "working", 35);
+            showAutomationStatus("อัปโหลดเสร็จแล้ว กำลังกด + เพื่อเลือก Add to Prompt…", "working", 14);
             promptAfterIngredient = await addAssetAsIngredient(
               job.image.name,
               findPromptField() || promptField,
@@ -2239,51 +2525,29 @@ async function automateProjectCreation() {
             throw new Error("Could not add uploaded image as an ingredient");
           }
 
-          showAutomationStatus("เพิ่ม Ingredient แล้ว รอช่อง Prompt ให้พร้อม…", "working", 38);
+          showAutomationStatus(
+            `เพิ่มรูปต้นฉบับแล้ว เตรียมสร้าง ${clipCount} คลิป…`,
+            "working",
+            14,
+            WORKFLOW_STAGES.SOURCE_MEDIA,
+          );
           await delay(1000);
-          showAutomationStatus(
-            "กำลังใส่และตรวจสอบ Image Prompt…",
-            "working",
-            42,
-            WORKFLOW_STAGES.IMAGE_PROMPT,
-          );
-          const promptWasFilled = await fillPromptAndVerify(
-            job.prompt,
+          const clipsCompleted = await runClipSequence(
+            job,
             promptAfterIngredient,
+            clipCount,
           );
-          if (!promptWasFilled) {
-            throw new Error("Image prompt did not remain in the prompt field");
-          }
-          const mediaBeforeImageGeneration = getWorkspaceMediaSignatures(
-            promptAfterIngredient,
-          );
-          showAutomationStatus(
-            "กำลังกด Enter เพื่อเริ่มสร้างรูป…",
-            "working",
-            47,
-            WORKFLOW_STAGES.IMAGE_GENERATION,
-          );
-          const submitted = await submitPromptForGeneration(promptAfterIngredient);
-          if (!submitted) {
-            throw new Error("Could not start image generation");
-          }
-          const videoSubmitted = await generateVideoFromLatestImage(
-            job.videoPrompt,
-            promptAfterIngredient,
-            mediaBeforeImageGeneration,
-            job.image.name,
-          );
-          if (!videoSubmitted) {
-            throw new Error("Could not complete image-to-video generation");
+          if (!clipsCompleted) {
+            throw new Error("Could not complete clip sequence");
           }
           showAutomationStatus(
-            `สร้างรูป x${outputCount} แล้ว และเริ่มสร้างวิดีโอ Veo 3.1 Lite · 8s · x1 แล้ว`,
+            `สร้างวิดีโอครบ ${clipCount} คลิปแล้ว`,
             "success",
             100,
           );
           await finishAutomation(
             "prepared",
-            `สร้างรูป x${outputCount} แล้ว และเริ่มสร้างวิดีโอ 9:16 · Veo 3.1 Lite · 8s · x1 แล้ว`,
+            `สร้างรูป AI ใหม่และวิดีโอ 9:16 ครบ ${clipCount} คลิปแล้ว`,
           );
           setTimeout(() => document.querySelector("#flow-launcher-status")?.remove(), 5000);
           return;
@@ -2325,6 +2589,10 @@ async function automateProjectCreation() {
 
 function getFailureDetail(error) {
   const message = String(error?.message ?? error);
+  const clipStage = message.match(/CLIP_STAGE:([A-Z0-9_]+)/)?.[1];
+  if (clipStage) {
+    return `ขั้นตอนสร้างหลายคลิปหยุดที่ [${clipStage}] กรุณาส่งรหัสนี้มาเพื่อตรวจจุดที่ผิด`;
+  }
   const videoStage = message.match(/VIDEO_STAGE:([A-Z0-9_]+)/)?.[1];
   if (videoStage) {
     return `ขั้นตอน Video หยุดที่ [${videoStage}] กรุณาส่งรหัสนี้มาเพื่อตรวจจุดที่ผิด`;

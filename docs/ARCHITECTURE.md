@@ -53,11 +53,30 @@ thumbnail และป้องกันไม่ให้เลือกรู�
 เป็น orchestration layer และ composition root ของ content script รวมขั้นตอนสร้าง
 โปรเจกต์ ตั้งค่า Image อัปโหลดรูป ใส่ prompt รอผล และสร้าง Video
 
+`runClipSequence()` ควบคุมการสร้างหลายคลิปตาม `job.clipCount` โดยแต่ละรอบทำงานดังนี้:
+
+```text
+รูปต้นฉบับเดิม
+→ Image x1
+→ รอรูป AI ใหม่
+→ นำรูป AI ใหม่เข้า Prompt
+→ Video x1
+→ รอวิดีโอเสร็จ
+→ เริ่มรอบถัดไป
+```
+
+รอบที่สองเป็นต้นไปจะเปลี่ยน Image/Video จากชิปตั้งค่าของ composer เท่านั้น โดยไม่คลิก
+เมนู `All Media`, `Images` หรือ `Videos` ทางซ้าย และต้องรอให้สถานะสร้างภาพสิ้นสุดพร้อม
+signature ของรูปใหม่คงที่ก่อนเริ่มขั้นตอน Video
+
+ก่อนรอบที่สองเป็นต้นไป ระบบต้องค้นหารูปต้นฉบับด้วยชื่อไฟล์ ห้าม fallback ไปใช้
+thumbnail แรก เพราะรายการแรกอาจเป็นรูป AI จากรอบก่อนหน้า
+
 ## Side Panel
 
 - `index.html` เก็บ semantic markup และ ID ที่ `app.js` ใช้
 - `styles.css` เก็บ design tokens และ responsive UI
-- `app.js` ตรวจ input สร้าง job และแสดง progress จาก content script
+- `app.js` ตรวจ input สร้าง job พร้อม `clipCount` และแสดง progress จาก content script
 
 ห้ามใส่ selector ของหน้า Flow ไว้ใน Side Panel เพราะทั้งสองส่วนทำงานคนละหน้า
 
