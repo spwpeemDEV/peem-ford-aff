@@ -6,13 +6,10 @@ const status = document.querySelector("#status");
 const statusCard = document.querySelector("#statusCard");
 const statusPercent = document.querySelector("#statusPercent");
 const statusProgress = document.querySelector("#statusProgress");
-const imageInput = document.querySelector("#imageInput");
-const imagePreview = document.querySelector("#imagePreview");
-const uploadIcon = document.querySelector("#uploadIcon");
-const imagePrompt = document.querySelector("#imagePrompt");
-const videoPrompt = document.querySelector("#videoPrompt");
-const clipCount = document.querySelector("#clipCount");
-const fileName = document.querySelector("#fileName");
+const productList = document.querySelector("#productList");
+const productTemplate = document.querySelector("#productTemplate");
+const addProductButton = document.querySelector("#addProduct");
+const loopCount = document.querySelector("#loopCount");
 const cancelButton = document.querySelector("#cancelAutomation");
 const syncTiktokBtn = document.querySelector("#syncTiktokBtn");
 const cancelSyncBtn = document.querySelector("#cancelSyncBtn");
@@ -22,7 +19,9 @@ const tiktokIdOutput = document.querySelector("#tiktokIdOutput");
 const tiktokSyncStatus = document.querySelector("#tiktokSyncStatus");
 
 let activeTabId = null;
-let imagePreviewUrl = null;
+let nextProductId = 1;
+const previewUrls = new Map();
+const MAX_PRODUCTS = 10;
 
 versionLabel.textContent = `v${chrome.runtime.getManifest().version}`;
 
@@ -57,59 +56,114 @@ function readFileAsDataUrl(file) {
   });
 }
 
-function updateImagePreview(file) {
-  if (imagePreviewUrl) {
-    URL.revokeObjectURL(imagePreviewUrl);
-    imagePreviewUrl = null;
-  }
+function updateProductTitles() {
+  const rows = [...productList.querySelectorAll(".product-row")];
+  rows.forEach((row, index) => {
+    row.querySelector('[data-role="product-title"]').textContent = `สินค้า ${index + 1}`;
+  });
+  addProductButton.disabled = rows.length >= MAX_PRODUCTS;
+}
 
+function revokePreview(row) {
+  const url = previewUrls.get(row);
+  if (url) {
+    URL.revokeObjectURL(url);
+    previewUrls.delete(row);
+  }
+}
+
+function updateProductPreview(row, file) {
+  revokePreview(row);
+  const preview = row.querySelector('[data-role="image-preview"]');
+  const icon = row.querySelector('[data-role="upload-icon"]');
+  const fileName = row.querySelector('[data-role="file-name"]');
   if (!file) {
-    imagePreview.hidden = true;
-    imagePreview.removeAttribute("src");
-    uploadIcon.hidden = false;
+    preview.hidden = true;
+    preview.removeAttribute("src");
+    icon.hidden = false;
     fileName.textContent = "เลือกรูปภาพ";
     return;
   }
-
-  imagePreviewUrl = URL.createObjectURL(file);
-  imagePreview.src = imagePreviewUrl;
-  imagePreview.hidden = false;
-  uploadIcon.hidden = true;
+  const url = URL.createObjectURL(file);
+  previewUrls.set(row, url);
+  preview.src = url;
+  preview.hidden = false;
+  icon.hidden = true;
   fileName.textContent = file.name;
 }
 
-imageInput.addEventListener("change", () => {
-  updateImagePreview(imageInput.files[0]);
-});
+function addProductRow() {
+  if (productList.children.length >= MAX_PRODUCTS) {
+    return;
+  }
+  const row = productTemplate.content.firstElementChild.cloneNode(true);
+  const id = nextProductId++;
+  const imageInput = row.querySelector('[data-role="image-input"]');
+  const imagePrompt = row.querySelector('[data-role="image-prompt"]');
+  const videoPrompt = row.querySelector('[data-role="video-prompt"]');
+  imageInput.id = `product-image-${id}`;
+  imagePrompt.id = `product-image-prompt-${id}`;
+  videoPrompt.id = `product-video-prompt-${id}`;
+  imageInput.closest("label").htmlFor = imageInput.id;
+  imagePrompt.closest("label").htmlFor = imagePrompt.id;
+  videoPrompt.closest("label").htmlFor = videoPrompt.id;
+  imageInput.addEventListener("change", () => {
+    updateProductPreview(row, imageInput.files[0]);
+  });
+  row
+    .querySelector('[data-action="remove-product"]')
+    .addEventListener("click", () => {
+      if (productList.children.length <= 1) {
+        return;
+      }
+      revokePreview(row);
+      row.remove();
+      updateProductTitles();
+    });
+  productList.append(row);
+  updateProductTitles();
+}
+
+addProductButton.addEventListener("click", addProductRow);
+addProductRow();
 
 startButton.addEventListener("click", async () => {
-  const [imageFile] = imageInput.files;
-  const prompt = imagePrompt.value.trim();
-  const requestedVideoPrompt = videoPrompt.value.trim();
-  const requestedClipCount = Number(clipCount.value);
+  const rows = [...productList.querySelectorAll(".product-row")];
+  const requestedLoopCount = Number(loopCount.value);
+  const safeLoopCount = [1, 2, 3, 4].includes(requestedLoopCount)
+    ? requestedLoopCount
+    : 1;
+  const drafts = [];
 
-  if (!imageFile) {
-    setStatus("กรุณาเลือกรูปภาพอ้างอิง", { state: "error" });
-    imageInput.focus();
-    return;
-  }
-
-  if (imageFile.size > MAX_IMAGE_SIZE_BYTES) {
-    setStatus("รูปภาพต้องมีขนาดไม่เกิน 20 MB", { state: "error" });
-    imageInput.focus();
-    return;
-  }
-
-  if (!prompt) {
-    setStatus("กรุณาใส่ Image Prompt", { state: "error" });
-    imagePrompt.focus();
-    return;
-  }
-
-  if (!requestedVideoPrompt) {
-    setStatus("กรุณาใส่ Video Prompt", { state: "error" });
-    videoPrompt.focus();
-    return;
+  for (const [index, row] of rows.entries()) {
+    const imageInput = row.querySelector('[data-role="image-input"]');
+    const imagePrompt = row.querySelector('[data-role="image-prompt"]');
+    const videoPrompt = row.querySelector('[data-role="video-prompt"]');
+    const [imageFile] = imageInput.files;
+    const prompt = imagePrompt.value.trim();
+    const requestedVideoPrompt = videoPrompt.value.trim();
+    const label = `สินค้า ${index + 1}`;
+    if (!imageFile) {
+      setStatus(`${label}: กรุณาเลือกรูปภาพอ้างอิง`, { state: "error" });
+      imageInput.focus();
+      return;
+    }
+    if (imageFile.size > MAX_IMAGE_SIZE_BYTES) {
+      setStatus(`${label}: รูปภาพต้องมีขนาดไม่เกิน 20 MB`, { state: "error" });
+      imageInput.focus();
+      return;
+    }
+    if (!prompt) {
+      setStatus(`${label}: กรุณาใส่ Image Prompt`, { state: "error" });
+      imagePrompt.focus();
+      return;
+    }
+    if (!requestedVideoPrompt) {
+      setStatus(`${label}: กรุณาใส่ Video Prompt`, { state: "error" });
+      videoPrompt.focus();
+      return;
+    }
+    drafts.push({ imageFile, prompt, videoPrompt: requestedVideoPrompt });
   }
 
   startButton.disabled = true;
@@ -118,23 +172,37 @@ startButton.addEventListener("click", async () => {
   const jobKey = `flowJob:${jobId}`;
 
   try {
-    const dataUrl = await readFileAsDataUrl(imageFile);
+    const products = await Promise.all(
+      drafts.map(
+        async (
+          { imageFile, prompt, videoPrompt: productVideoPrompt },
+          index,
+        ) => ({
+          prompt,
+          videoPrompt: productVideoPrompt,
+          image: {
+            name: `product-${String(index + 1).padStart(2, "0")}-${imageFile.name}`,
+            type: imageFile.type || "image/png",
+            dataUrl: await readFileAsDataUrl(imageFile),
+          },
+        }),
+      ),
+    );
+    const firstProduct = products[0];
     await chrome.storage.local.set({
       [jobKey]: {
-        prompt,
-        videoPrompt: requestedVideoPrompt,
-        clipCount: [1, 2, 3, 4].includes(requestedClipCount)
-          ? requestedClipCount
-          : 1,
-        image: {
-          name: imageFile.name,
-          type: imageFile.type || "image/png",
-          dataUrl,
-        },
+        products,
+        loopCount: safeLoopCount,
+        image: firstProduct.image,
+        prompt: firstProduct.prompt,
+        videoPrompt: firstProduct.videoPrompt,
       },
     });
 
-    setStatus("กำลังเปิด Flow เพื่อสร้างรูปและวิดีโอ…", { progress: 2 });
+    setStatus(
+      `กำลังเปิด Flow · ${products.length} สินค้า × ${safeLoopCount} ลูป…`,
+      { progress: 2 },
+    );
     const response = await chrome.runtime.sendMessage({
       type: "createFlowProject",
       jobId,
@@ -369,7 +437,8 @@ chrome.runtime.onMessage.addListener((message) => {
 });
 
 window.addEventListener("unload", () => {
-  if (imagePreviewUrl) {
-    URL.revokeObjectURL(imagePreviewUrl);
+  for (const url of previewUrls.values()) {
+    URL.revokeObjectURL(url);
   }
+  previewUrls.clear();
 });

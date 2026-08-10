@@ -1,9 +1,9 @@
 const FLOW_AI_URL = "https://labs.google/fx/tools/flow";
 const PENDING_PROJECTS_KEY = "pendingFlowProjects";
-// Four sequential clips can legitimately take well over 10 minutes.
+// A multi-product batch can legitimately run for several hours.
 // Keep the tab/job mapping alive so cancellation and final cleanup continue
-// to work throughout the complete multi-clip run.
-const PENDING_TTL_MS = 60 * 60 * 1000;
+// to work throughout every product in every loop.
+const PENDING_TTL_MS = 12 * 60 * 60 * 1000;
 
 async function enableSidePanel() {
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });

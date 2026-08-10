@@ -53,7 +53,8 @@ thumbnail และป้องกันไม่ให้เลือกรู�
 เป็น orchestration layer และ composition root ของ content script รวมขั้นตอนสร้าง
 โปรเจกต์ ตั้งค่า Image อัปโหลดรูป ใส่ prompt รอผล และสร้าง Video
 
-`runClipSequence()` ควบคุมการสร้างหลายคลิปตาม `job.clipCount` โดยแต่ละรอบทำงานดังนี้:
+`createProductLoopQueue()` สร้างคิวแบบลูปก่อน สินค้าทีหลัง เช่น 2 สินค้า × 2 ลูป จะได้
+`สินค้า 1 → สินค้า 2 → สินค้า 1 → สินค้า 2` จากนั้น `runClipSequence()` ใช้ขั้นตอนเดิมกับแต่ละงานในคิว:
 
 ```text
 รูปต้นฉบับเดิม
@@ -76,7 +77,7 @@ thumbnail แรก เพราะรายการแรกอาจเป็
 
 - `index.html` เก็บ semantic markup และ ID ที่ `app.js` ใช้
 - `styles.css` เก็บ design tokens และ responsive UI
-- `app.js` ตรวจ input สร้าง job พร้อม `clipCount` และแสดง progress จาก content script
+- `app.js` ตรวจข้อมูลสินค้าทุกแถว สร้าง job พร้อม `products` และ `loopCount` แล้วแสดง progress จาก content script
 
 ห้ามใส่ selector ของหน้า Flow ไว้ใน Side Panel เพราะทั้งสองส่วนทำงานคนละหน้า
 

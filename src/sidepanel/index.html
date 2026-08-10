@@ -28,84 +28,62 @@
         </div>
 
         <div class="automation-form">
-          <label class="field upload-field" for="imageInput">
-            <span class="field-heading">
-              <span class="step-number">01</span>
-              <span>
-                <strong>รูปภาพอ้างอิง</strong>
-                <small>PNG, JPG หรือ WEBP · ไม่เกิน 20 MB</small>
-              </span>
-            </span>
-            <span class="file-picker">
-              <span class="preview-shell">
-                <img id="imagePreview" alt="ตัวอย่างรูปภาพที่เลือก" hidden />
-                <span id="uploadIcon" class="upload-icon" aria-hidden="true"
-                  >＋</span
-                >
-              </span>
-              <span class="file-copy">
-                <strong id="fileName">เลือกรูปภาพ</strong>
-                <small>คลิกเพื่อเลือกไฟล์จากเครื่อง</small>
-              </span>
-              <span class="picker-arrow" aria-hidden="true">›</span>
-            </span>
-            <input
-              id="imageInput"
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-            />
-          </label>
-
-          <label class="field" for="imagePrompt">
-            <span class="field-heading">
-              <span class="step-number">02</span>
-              <span>
-                <strong>Image Prompt</strong>
-                <small>อธิบายภาพที่ต้องการสร้าง</small>
-              </span>
-            </span>
-            <span class="input-shell">
-              <textarea
-                id="imagePrompt"
-                rows="4"
-                placeholder="เช่น เปลี่ยนสินค้าในภาพให้เป็นโฆษณาสไตล์มินิมอล…"
-              ></textarea>
-              <span class="input-tag">9:16 · NANO BANANA 2</span>
-            </span>
-          </label>
-
-          <label class="field" for="videoPrompt">
-            <span class="field-heading">
-              <span class="step-number">03</span>
-              <span>
-                <strong>Video Prompt</strong>
-                <small>กำหนดการเคลื่อนไหวและมุมกล้อง</small>
-              </span>
-            </span>
-            <span class="input-shell">
-              <textarea
-                id="videoPrompt"
-                rows="4"
-                placeholder="เช่น กล้องค่อย ๆ ซูมเข้า แสงนุ่มนวล เคลื่อนไหวสมจริง…"
-              ></textarea>
-              <span class="input-tag">VEO 3.1 LITE · 8S</span>
-            </span>
-          </label>
-
-          <label class="field compact-field" for="clipCount">
+          <div class="product-list-heading">
             <span>
-              <strong>จำนวนคลิป</strong>
-              <small>สร้างรูป AI ใหม่และวิดีโอซ้ำตามจำนวน</small>
+              <strong>กำหนดสินค้า</strong>
+              <small>แต่ละแถวมีรูป, Image Prompt และ Video Prompt</small>
             </span>
-            <select id="clipCount" aria-label="จำนวนคลิปที่ต้องการสร้าง">
-              <option value="1" selected>1 คลิป</option>
-              <option value="2">2 คลิป</option>
-              <option value="3">3 คลิป</option>
-              <option value="4">4 คลิป</option>
+            <button id="addProduct" class="icon-add-product" type="button" aria-label="เพิ่มสินค้า">＋</button>
+          </div>
+
+          <div id="productList" class="product-list"></div>
+
+          <label class="field compact-field" for="loopCount">
+            <span>
+              <strong>จำนวนลูป</strong>
+              <small>1 ลูป = ทำสินค้าทุกตัวตามลำดับหนึ่งครั้ง</small>
+            </span>
+            <select id="loopCount" aria-label="จำนวนลูปที่ต้องการสร้าง">
+              <option value="1" selected>1 ลูป</option>
+              <option value="2">2 ลูป</option>
+              <option value="3">3 ลูป</option>
+              <option value="4">4 ลูป</option>
             </select>
           </label>
         </div>
       </section>
+
+      <template id="productTemplate">
+        <article class="product-row">
+          <header class="product-row-header">
+            <span data-role="product-title">สินค้า 1</span>
+            <button data-action="remove-product" class="remove-product" type="button">ลบ</button>
+          </header>
+          <label class="field upload-field">
+            <span class="field-heading">
+              <span class="step-number">01</span>
+              <span><strong>รูปภาพอ้างอิง</strong><small>PNG, JPG หรือ WEBP · ไม่เกิน 20 MB</small></span>
+            </span>
+            <span class="file-picker">
+              <span class="preview-shell">
+                <img data-role="image-preview" alt="ตัวอย่างรูปสินค้า" hidden />
+                <span data-role="upload-icon" class="upload-icon" aria-hidden="true">＋</span>
+              </span>
+              <span class="file-copy"><strong data-role="file-name">เลือกรูปภาพ</strong><small>คลิกเพื่อเลือกไฟล์จากเครื่อง</small></span>
+              <span class="picker-arrow" aria-hidden="true">›</span>
+            </span>
+            <input data-role="image-input" type="file" accept="image/png,image/jpeg,image/webp" />
+          </label>
+          <label class="field">
+            <span class="field-heading"><span class="step-number">02</span><span><strong>Image Prompt</strong><small>อธิบายภาพของสินค้านี้</small></span></span>
+            <span class="input-shell"><textarea data-role="image-prompt" rows="3" placeholder="Image Prompt…"></textarea><span class="input-tag">9:16 · NANO BANANA 2</span></span>
+          </label>
+          <label class="field">
+            <span class="field-heading"><span class="step-number">03</span><span><strong>Video Prompt</strong><small>กำหนดการเคลื่อนไหวของสินค้านี้</small></span></span>
+            <span class="input-shell"><textarea data-role="video-prompt" rows="3" placeholder="Video Prompt…"></textarea><span class="input-tag">VEO 3.1 LITE · 8S</span></span>
+          </label>
+        </article>
+      </template>
 
       <!-- ส่วนที่ 2: แสดงสถานะการทำงาน (Flow AI) -->
       <section id="statusCard" class="status-card" data-state="idle" hidden>

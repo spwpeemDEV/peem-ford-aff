@@ -1242,27 +1242,58 @@ async function waitForPickerAssetReady(picker, imageName) {
   const baseName = imageName.replace(/\.[^.]+$/, "");
   const namePattern = new RegExp(escapeRegExp(baseName), "i");
   let triedSelectingNamedAsset = false;
+  let namedAssetSelectedAt = 0;
 
   while (!automationCancelled && Date.now() - startedAt < UPLOAD_TIMEOUT_MS) {
-    if (!hasUploadProgress()) {
-      if (!triedSelectingNamedAsset) {
-        const namedAsset = findTextControl([namePattern], picker);
-        if (namedAsset) {
-          triedSelectingNamedAsset = true;
-          await activateElement(namedAsset);
-          await delay(500);
-        }
-      }
+    if (hasUploadProgress()) {
+      await delay(400);
+      continue;
+    }
 
-      const addToPromptAction =
-        findTextControl(ADD_TO_PROMPT_LABELS, picker) || findAction(ADD_TO_PROMPT_LABELS, picker);
-      if (
-        addToPromptAction &&
-        !addToPromptAction.matches(":disabled, [aria-disabled='true'], [data-disabled='true']")
-      ) {
-        console.log("[flow-launcher] picker: 'Add to Prompt' is ready", addToPromptAction);
-        return addToPromptAction;
-      }
+    const namedAsset = findTextControl([namePattern], picker);
+    if (!namedAsset) {
+      // Do not accept an already-enabled Add to Prompt button here. While a
+      // new product is uploading, that button can still point at the asset
+      // selected for the previous product.
+      await delay(400);
+      continue;
+    }
+
+    if (!triedSelectingNamedAsset) {
+      triedSelectingNamedAsset = true;
+      await activateElement(namedAsset);
+      namedAssetSelectedAt = Date.now();
+      await delay(700);
+      continue;
+    }
+
+    // Give Flow enough time to move the picker selection from the previous
+    // product to the newly uploaded named asset before trusting the action.
+    if (Date.now() - namedAssetSelectedAt < 1200) {
+      await delay(300);
+      continue;
+    }
+
+    const confirmedNamedAsset = findTextControl([namePattern], picker);
+    if (!confirmedNamedAsset || hasUploadProgress()) {
+      await delay(400);
+      continue;
+    }
+
+    const addToPromptAction =
+      findTextControl(ADD_TO_PROMPT_LABELS, picker) ||
+      findAction(ADD_TO_PROMPT_LABELS, picker);
+    if (
+      addToPromptAction &&
+      !addToPromptAction.matches(
+        ":disabled, [aria-disabled='true'], [data-disabled='true']",
+      )
+    ) {
+      console.log(
+        "[flow-launcher] picker: named asset selected; 'Add to Prompt' is ready",
+        { imageName, addToPromptAction },
+      );
+      return addToPromptAction;
     }
     await delay(400);
   }
@@ -2043,8 +2074,9 @@ async function generateVideoFromLatestImage(
   originalImageName,
   clipIndex = 0,
   clipCount = 1,
+  clipLabelOverride = "",
 ) {
-  const clipLabel = getClipLabel(clipIndex, clipCount);
+  const clipLabel = clipLabelOverride || getClipLabel(clipIndex, clipCount);
   showAutomationStatus(
     `${clipLabel} · กำลังรอ AI สร้างรูปให้เสร็จ…`,
     "working",
@@ -2130,15 +2162,37 @@ async function generateVideoFromLatestImage(
     : null;
 }
 
-async function runClipSequence(job, initialPromptField, clipCount) {
+function createProductLoopQueue(products, loopCount) {
+  const queue = [];
+  for (let loopIndex = 0; loopIndex < loopCount; loopIndex += 1) {
+    for (
+      let productIndex = 0;
+      productIndex < products.length;
+      productIndex += 1
+    ) {
+      queue.push({
+        job: products[productIndex],
+        loopIndex,
+        productIndex,
+      });
+    }
+  }
+  return queue;
+}
+
+async function runClipSequence(products, initialPromptField, loopCount) {
   let promptField = initialPromptField;
+  const queue = createProductLoopQueue(products, loopCount);
+  const clipCount = queue.length;
 
   for (let clipIndex = 0; clipIndex < clipCount; clipIndex += 1) {
     if (automationCancelled) {
       return false;
     }
 
-    const clipLabel = getClipLabel(clipIndex, clipCount);
+    const queueItem = queue[clipIndex];
+    const job = queueItem.job;
+    const clipLabel = `ลูป ${queueItem.loopIndex + 1}/${loopCount} · สินค้า ${queueItem.productIndex + 1}/${products.length}`;
 
     if (clipIndex > 0) {
       promptField = await waitForUsablePromptField(promptField, 60 * 1000);
@@ -2172,10 +2226,10 @@ async function runClipSequence(job, initialPromptField, clipCount) {
         getClipProgress(clipIndex, clipCount, 0.08),
         WORKFLOW_STAGES.SOURCE_MEDIA,
       );
-      const promptWithOriginal = await addAssetAsIngredient(
-        job.image.name,
-        promptField,
-      );
+      const productHasBeenUploaded = queueItem.loopIndex > 0;
+      const promptWithOriginal = productHasBeenUploaded
+        ? await addAssetAsIngredient(job.image.name, promptField)
+        : await attachImageViaAddToPrompt(promptField, job.image);
       if (!promptWithOriginal) {
         throw new Error(`CLIP_STAGE:ADD_ORIGINAL_${clipIndex + 1}`);
       }
@@ -2213,6 +2267,7 @@ async function runClipSequence(job, initialPromptField, clipCount) {
       job.image.name,
       clipIndex,
       clipCount,
+      clipLabel,
     );
     if (!videoRun) {
       throw new Error(`CLIP_STAGE:SUBMIT_VIDEO_${clipIndex + 1}`);
@@ -2397,14 +2452,30 @@ async function automateProjectCreation() {
   const jobKey = `flowJob:${response.jobId}`;
   const stored = await chrome.storage.local.get(jobKey);
   const job = stored[jobKey];
-  if (!job?.image?.dataUrl || !job?.prompt || !job?.videoPrompt) {
+  const products = Array.isArray(job?.products) && job.products.length
+    ? job.products
+    : job
+      ? [{ image: job.image, prompt: job.prompt, videoPrompt: job.videoPrompt }]
+      : [];
+  if (
+    !products.length ||
+    products.some(
+      (product) =>
+        !product?.image?.dataUrl || !product?.prompt || !product?.videoPrompt,
+    )
+  ) {
     throw new Error("Flow automation data is incomplete");
   }
   workflowState.reset();
-  const requestedClipCount = Number(job.clipCount ?? job.outputCount);
-  const clipCount = [1, 2, 3, 4].includes(requestedClipCount)
-    ? requestedClipCount
+  const requestedLoopCount = Number(
+    job.loopCount ?? job.clipCount ?? job.outputCount,
+  );
+  const loopCount = [1, 2, 3, 4].includes(requestedLoopCount)
+    ? requestedLoopCount
     : 1;
+  const clipCount = products.length * loopCount;
+  const primaryProduct = products[0];
+  const batchSummary = `${products.length} สินค้า × ${loopCount} ลูป (${clipCount} คลิป)`;
 
   showAutomationStatus(
     "กำลังค้นหาปุ่ม + New project…",
@@ -2468,33 +2539,36 @@ async function automateProjectCreation() {
       if (!imageAttached && !triedPickerUpload) {
         triedPickerUpload = true;
         showAutomationStatus("กำลังกด + เพื่อเปิดคลังสื่อและอัปโหลดรูป…", "working", 13);
-        const promptViaPicker = await attachImageViaAddToPrompt(promptField, job.image);
+        const promptViaPicker = await attachImageViaAddToPrompt(
+          promptField,
+          primaryProduct.image,
+        );
 
         if (promptViaPicker) {
           imageAttached = true;
           showAutomationStatus(
-            `เพิ่มรูปต้นฉบับแล้ว เตรียมสร้าง ${clipCount} คลิป…`,
+            `เพิ่มรูปสินค้าแรกแล้ว เตรียมทำ ${batchSummary}…`,
             "working",
             14,
             WORKFLOW_STAGES.SOURCE_MEDIA,
           );
           await delay(1000);
           const clipsCompleted = await runClipSequence(
-            job,
+            products,
             promptViaPicker,
-            clipCount,
+            loopCount,
           );
           if (!clipsCompleted) {
             throw new Error("Could not complete clip sequence");
           }
           showAutomationStatus(
-            `สร้างวิดีโอครบ ${clipCount} คลิปแล้ว`,
+            `สร้างครบ ${batchSummary} แล้ว`,
             "success",
             100,
           );
           await finishAutomation(
             "prepared",
-            `สร้างรูป AI ใหม่และวิดีโอ 9:16 ครบ ${clipCount} คลิปแล้ว`,
+            `สร้างรูป AI ใหม่และวิดีโอ 9:16 ครบ ${batchSummary} แล้ว`,
           );
           setTimeout(() => document.querySelector("#flow-launcher-status")?.remove(), 5000);
           return;
@@ -2509,12 +2583,12 @@ async function automateProjectCreation() {
         const fileInput = findImageFileInput();
         if (fileInput) {
           const promptStateBeforeUpload = capturePromptState(promptField);
-          attachImage(fileInput, job.image);
+          attachImage(fileInput, primaryProduct.image);
           imageAttached = true;
           showAutomationStatus("กำลังอัปโหลดรูปภาพ กรุณารอสักครู่…", "working", 13);
 
           const uploadOutcome = await waitForUploadOutcome(
-            job.image.name,
+            primaryProduct.image.name,
             promptStateBeforeUpload,
             promptField,
           );
@@ -2531,7 +2605,7 @@ async function automateProjectCreation() {
           } else {
             showAutomationStatus("อัปโหลดเสร็จแล้ว กำลังกด + เพื่อเลือก Add to Prompt…", "working", 14);
             promptAfterIngredient = await addAssetAsIngredient(
-              job.image.name,
+              primaryProduct.image.name,
               findPromptField() || promptField,
             );
           }
@@ -2541,28 +2615,28 @@ async function automateProjectCreation() {
           }
 
           showAutomationStatus(
-            `เพิ่มรูปต้นฉบับแล้ว เตรียมสร้าง ${clipCount} คลิป…`,
+            `เพิ่มรูปสินค้าแรกแล้ว เตรียมทำ ${batchSummary}…`,
             "working",
             14,
             WORKFLOW_STAGES.SOURCE_MEDIA,
           );
           await delay(1000);
           const clipsCompleted = await runClipSequence(
-            job,
+            products,
             promptAfterIngredient,
-            clipCount,
+            loopCount,
           );
           if (!clipsCompleted) {
             throw new Error("Could not complete clip sequence");
           }
           showAutomationStatus(
-            `สร้างวิดีโอครบ ${clipCount} คลิปแล้ว`,
+            `สร้างครบ ${batchSummary} แล้ว`,
             "success",
             100,
           );
           await finishAutomation(
             "prepared",
-            `สร้างรูป AI ใหม่และวิดีโอ 9:16 ครบ ${clipCount} คลิปแล้ว`,
+            `สร้างรูป AI ใหม่และวิดีโอ 9:16 ครบ ${batchSummary} แล้ว`,
           );
           setTimeout(() => document.querySelector("#flow-launcher-status")?.remove(), 5000);
           return;
