@@ -30,15 +30,28 @@
         <div class="automation-form">
           <div class="product-list-heading">
             <span>
-              <strong>กำหนดสินค้า</strong>
-              <small>แต่ละแถวมีรูป, Image Prompt และ Video Prompt</small>
+              <span class="heading-line">
+                <strong>รายการสินค้า</strong>
+                <span id="productCount" class="count-pill">1 / 10</span>
+              </span>
+              <small>เพิ่มสินค้าและกรอกข้อมูลให้ครบทั้ง 3 ขั้นตอน</small>
             </span>
-            <button id="addProduct" class="icon-add-product" type="button" aria-label="เพิ่มสินค้า">＋</button>
+            <button id="addProduct" class="add-product-button" type="button">
+              <span aria-hidden="true">＋</span>
+              เพิ่มสินค้า
+            </button>
           </div>
 
-          <div id="productList" class="product-list"></div>
+          <div class="product-table" aria-label="ตารางรายการสินค้า">
+            <div class="product-table-head" aria-hidden="true">
+              <span>สินค้า</span>
+              <span>สถานะ</span>
+              <span>จัดการ</span>
+            </div>
+            <div id="productList" class="product-list"></div>
+          </div>
 
-          <label class="field compact-field" for="loopCount">
+          <label class="field compact-field loop-field" for="loopCount">
             <span>
               <strong>จำนวนลูป</strong>
               <small>1 ลูป = ทำสินค้าทุกตัวตามลำดับหนึ่งครั้ง</small>
@@ -50,38 +63,68 @@
               <option value="4">4 ลูป</option>
             </select>
           </label>
+          <div id="jobSummary" class="job-summary" aria-live="polite">
+            <span>งานทั้งหมด</span>
+            <strong>1 สินค้า × 1 ลูป = 1 คลิป</strong>
+          </div>
         </div>
       </section>
 
       <template id="productTemplate">
-        <article class="product-row">
+        <article class="product-row" data-expanded="true">
           <header class="product-row-header">
-            <span data-role="product-title">สินค้า 1</span>
-            <button data-action="remove-product" class="remove-product" type="button">ลบ</button>
-          </header>
-          <label class="field upload-field">
-            <span class="field-heading">
-              <span class="step-number">01</span>
-              <span><strong>รูปภาพอ้างอิง</strong><small>PNG, JPG หรือ WEBP · ไม่เกิน 20 MB</small></span>
-            </span>
-            <span class="file-picker">
-              <span class="preview-shell">
-                <img data-role="image-preview" alt="ตัวอย่างรูปสินค้า" hidden />
-                <span data-role="upload-icon" class="upload-icon" aria-hidden="true">＋</span>
+            <span class="product-identity">
+              <span class="product-index" data-role="product-index">1</span>
+              <span class="product-name">
+                <strong data-role="product-title">สินค้า 1</strong>
+                <small data-role="product-summary">ยังกรอกข้อมูลไม่ครบ</small>
               </span>
-              <span class="file-copy"><strong data-role="file-name">เลือกรูปภาพ</strong><small>คลิกเพื่อเลือกไฟล์จากเครื่อง</small></span>
-              <span class="picker-arrow" aria-hidden="true">›</span>
             </span>
-            <input data-role="image-input" type="file" accept="image/png,image/jpeg,image/webp" />
-          </label>
-          <label class="field">
-            <span class="field-heading"><span class="step-number">02</span><span><strong>Image Prompt</strong><small>อธิบายภาพของสินค้านี้</small></span></span>
-            <span class="input-shell"><textarea data-role="image-prompt" rows="3" placeholder="Image Prompt…"></textarea><span class="input-tag">9:16 · NANO BANANA 2</span></span>
-          </label>
-          <label class="field">
-            <span class="field-heading"><span class="step-number">03</span><span><strong>Video Prompt</strong><small>กำหนดการเคลื่อนไหวของสินค้านี้</small></span></span>
-            <span class="input-shell"><textarea data-role="video-prompt" rows="3" placeholder="Video Prompt…"></textarea><span class="input-tag">VEO 3.1 LITE · 8S</span></span>
-          </label>
+            <span class="product-status" data-role="product-status" data-state="incomplete">0 / 3</span>
+            <span class="product-actions">
+              <button
+                data-action="toggle-product"
+                class="toggle-product"
+                type="button"
+                aria-expanded="true"
+                aria-label="ย่อรายละเอียดสินค้า"
+              >
+                <span data-role="toggle-label">ย่อ</span>
+                <span class="toggle-caret" aria-hidden="true">⌃</span>
+              </button>
+              <button
+                data-action="remove-product"
+                class="remove-product"
+                type="button"
+                aria-label="ลบสินค้า"
+              >×</button>
+            </span>
+          </header>
+          <div class="product-editor" data-role="product-editor">
+            <label class="field upload-field">
+              <span class="field-heading">
+                <span class="step-number">01</span>
+                <span><strong>รูปภาพอ้างอิง</strong><small>PNG, JPG หรือ WEBP · ไม่เกิน 20 MB</small></span>
+              </span>
+              <span class="file-picker">
+                <span class="preview-shell">
+                  <img data-role="image-preview" alt="ตัวอย่างรูปสินค้า" hidden />
+                  <span data-role="upload-icon" class="upload-icon" aria-hidden="true">＋</span>
+                </span>
+                <span class="file-copy"><strong data-role="file-name">เลือกรูปภาพ</strong><small>คลิกเพื่อเลือกไฟล์จากเครื่อง</small></span>
+                <span class="picker-arrow" aria-hidden="true">›</span>
+              </span>
+              <input data-role="image-input" type="file" accept="image/png,image/jpeg,image/webp" />
+            </label>
+            <label class="field">
+              <span class="field-heading"><span class="step-number">02</span><span><strong>Image Prompt</strong><small>อธิบายภาพของสินค้านี้</small></span></span>
+              <span class="input-shell"><textarea data-role="image-prompt" rows="3" placeholder="อธิบายภาพที่ต้องการสร้าง…"></textarea><span class="input-tag">9:16 · NANO BANANA 2</span></span>
+            </label>
+            <label class="field">
+              <span class="field-heading"><span class="step-number">03</span><span><strong>Video Prompt</strong><small>กำหนดการเคลื่อนไหวของสินค้านี้</small></span></span>
+              <span class="input-shell"><textarea data-role="video-prompt" rows="3" placeholder="อธิบายการเคลื่อนไหวและมุมกล้อง…"></textarea><span class="input-tag">VEO 3.1 LITE · 8S</span></span>
+            </label>
+          </div>
         </article>
       </template>
 

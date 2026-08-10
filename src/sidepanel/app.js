@@ -9,7 +9,9 @@ const statusProgress = document.querySelector("#statusProgress");
 const productList = document.querySelector("#productList");
 const productTemplate = document.querySelector("#productTemplate");
 const addProductButton = document.querySelector("#addProduct");
+const productCount = document.querySelector("#productCount");
 const loopCount = document.querySelector("#loopCount");
+const jobSummary = document.querySelector("#jobSummary");
 const cancelButton = document.querySelector("#cancelAutomation");
 const syncTiktokBtn = document.querySelector("#syncTiktokBtn");
 const cancelSyncBtn = document.querySelector("#cancelSyncBtn");
@@ -56,12 +58,65 @@ function readFileAsDataUrl(file) {
   });
 }
 
+function setProductExpanded(row, expanded) {
+  const editor = row.querySelector('[data-role="product-editor"]');
+  const toggle = row.querySelector('[data-action="toggle-product"]');
+  const toggleLabel = row.querySelector('[data-role="toggle-label"]');
+  row.dataset.expanded = String(expanded);
+  editor.hidden = !expanded;
+  toggle.setAttribute("aria-expanded", String(expanded));
+  toggle.setAttribute(
+    "aria-label",
+    expanded ? "ย่อรายละเอียดสินค้า" : "เปิดรายละเอียดสินค้า",
+  );
+  toggleLabel.textContent = expanded ? "ย่อ" : "แก้ไข";
+}
+
+function updateJobSummary() {
+  const totalProducts = productList.querySelectorAll(".product-row").length;
+  const requestedLoopCount = Number(loopCount.value) || 1;
+  const totalClips = totalProducts * requestedLoopCount;
+  jobSummary.querySelector("strong").textContent =
+    `${totalProducts} สินค้า × ${requestedLoopCount} ลูป = ${totalClips} คลิป`;
+}
+
+function updateProductRowState(row) {
+  const imageInput = row.querySelector('[data-role="image-input"]');
+  const imagePrompt = row.querySelector('[data-role="image-prompt"]');
+  const videoPrompt = row.querySelector('[data-role="video-prompt"]');
+  const statusBadge = row.querySelector('[data-role="product-status"]');
+  const summary = row.querySelector('[data-role="product-summary"]');
+  const completedFields = [
+    Boolean(imageInput.files[0]),
+    Boolean(imagePrompt.value.trim()),
+    Boolean(videoPrompt.value.trim()),
+  ].filter(Boolean).length;
+  const isComplete = completedFields === 3;
+
+  row.dataset.complete = String(isComplete);
+  statusBadge.dataset.state = isComplete ? "complete" : "incomplete";
+  statusBadge.textContent = isComplete ? "พร้อม" : `${completedFields} / 3`;
+  summary.textContent = isComplete
+    ? imageInput.files[0].name
+    : completedFields > 0
+      ? `กรอกแล้ว ${completedFields} จาก 3 ขั้นตอน`
+      : "ยังกรอกข้อมูลไม่ครบ";
+}
+
 function updateProductTitles() {
   const rows = [...productList.querySelectorAll(".product-row")];
   rows.forEach((row, index) => {
     row.querySelector('[data-role="product-title"]').textContent = `สินค้า ${index + 1}`;
+    row.querySelector('[data-role="product-index"]').textContent = index + 1;
+    row.querySelector('[data-action="remove-product"]').setAttribute(
+      "aria-label",
+      `ลบสินค้า ${index + 1}`,
+    );
+    updateProductRowState(row);
   });
   addProductButton.disabled = rows.length >= MAX_PRODUCTS;
+  productCount.textContent = `${rows.length} / ${MAX_PRODUCTS}`;
+  updateJobSummary();
 }
 
 function revokePreview(row) {
@@ -96,6 +151,10 @@ function addProductRow() {
   if (productList.children.length >= MAX_PRODUCTS) {
     return;
   }
+  const existingRows = [...productList.querySelectorAll(".product-row")];
+  existingRows.forEach((existingRow) => {
+    setProductExpanded(existingRow, false);
+  });
   const row = productTemplate.content.firstElementChild.cloneNode(true);
   const id = nextProductId++;
   const imageInput = row.querySelector('[data-role="image-input"]');
@@ -109,7 +168,15 @@ function addProductRow() {
   videoPrompt.closest("label").htmlFor = videoPrompt.id;
   imageInput.addEventListener("change", () => {
     updateProductPreview(row, imageInput.files[0]);
+    updateProductRowState(row);
   });
+  imagePrompt.addEventListener("input", () => updateProductRowState(row));
+  videoPrompt.addEventListener("input", () => updateProductRowState(row));
+  row
+    .querySelector('[data-action="toggle-product"]')
+    .addEventListener("click", () => {
+      setProductExpanded(row, row.dataset.expanded !== "true");
+    });
   row
     .querySelector('[data-action="remove-product"]')
     .addEventListener("click", () => {
@@ -119,13 +186,30 @@ function addProductRow() {
       revokePreview(row);
       row.remove();
       updateProductTitles();
+      const remainingRows = [...productList.querySelectorAll(".product-row")];
+      if (remainingRows.length && !remainingRows.some((item) => item.dataset.expanded === "true")) {
+        setProductExpanded(remainingRows[0], true);
+      }
     });
   productList.append(row);
+  setProductExpanded(row, true);
   updateProductTitles();
+  if (existingRows.length) {
+    requestAnimationFrame(() => {
+      row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }
 }
 
 addProductButton.addEventListener("click", addProductRow);
+loopCount.addEventListener("change", updateJobSummary);
 addProductRow();
+
+function focusProductField(row, field) {
+  setProductExpanded(row, true);
+  row.scrollIntoView({ behavior: "smooth", block: "center" });
+  setTimeout(() => field.focus(), 180);
+}
 
 startButton.addEventListener("click", async () => {
   const rows = [...productList.querySelectorAll(".product-row")];
@@ -145,22 +229,22 @@ startButton.addEventListener("click", async () => {
     const label = `สินค้า ${index + 1}`;
     if (!imageFile) {
       setStatus(`${label}: กรุณาเลือกรูปภาพอ้างอิง`, { state: "error" });
-      imageInput.focus();
+      focusProductField(row, imageInput);
       return;
     }
     if (imageFile.size > MAX_IMAGE_SIZE_BYTES) {
       setStatus(`${label}: รูปภาพต้องมีขนาดไม่เกิน 20 MB`, { state: "error" });
-      imageInput.focus();
+      focusProductField(row, imageInput);
       return;
     }
     if (!prompt) {
       setStatus(`${label}: กรุณาใส่ Image Prompt`, { state: "error" });
-      imagePrompt.focus();
+      focusProductField(row, imagePrompt);
       return;
     }
     if (!requestedVideoPrompt) {
       setStatus(`${label}: กรุณาใส่ Video Prompt`, { state: "error" });
-      videoPrompt.focus();
+      focusProductField(row, videoPrompt);
       return;
     }
     drafts.push({ imageFile, prompt, videoPrompt: requestedVideoPrompt });

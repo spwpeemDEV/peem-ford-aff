@@ -62,6 +62,8 @@ const workflowState = globalThis.FlowLauncherRuntime.createWorkflowState({
 const WORKFLOW_STAGES = globalThis.FlowLauncherRuntime.STAGES;
 
 let automationCancelled = false;
+let automationStartedAt = 0;
+let automationTimerId = null;
 
 function getClipProgress(clipIndex, clipCount, phase) {
   const workflowStart = 15;
@@ -84,7 +86,7 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 
   automationCancelled = true;
-  showAutomationStatus("ยกเลิกการทำงานแล้ว");
+  showAutomationStatus("ยกเลิกการทำงานแล้ว", "cancelled");
   setTimeout(() => document.querySelector("#flow-launcher-status")?.remove(), 2500);
 });
 
@@ -2305,6 +2307,59 @@ async function runClipSequence(products, initialPromptField, loopCount) {
   return true;
 }
 
+const STAGE_DISPLAY_LABELS = Object.freeze({
+  IDLE: "กำลังเตรียมงาน",
+  PROJECT_SETUP: "เตรียมโปรเจกต์",
+  IMAGE_SETUP: "ตั้งค่าภาพ",
+  SOURCE_MEDIA: "เตรียมรูปอ้างอิง",
+  IMAGE_PROMPT: "ใส่ Image Prompt",
+  IMAGE_GENERATION: "สร้างภาพ AI",
+  GENERATED_MEDIA: "เตรียมภาพที่สร้างแล้ว",
+  VIDEO_SETUP: "ตั้งค่าวิดีโอ",
+  VIDEO_PROMPT: "ใส่ Video Prompt",
+  VIDEO_GENERATION: "สร้างวิดีโอ",
+  WAIT_VIDEO_RESULT: "รอวิดีโอเสร็จ",
+  COMPLETE: "เสร็จสมบูรณ์",
+  FAILED: "พบข้อผิดพลาด",
+});
+
+function formatElapsedTime(elapsedMs) {
+  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const twoDigits = (value) => String(value).padStart(2, "0");
+  return hours > 0
+    ? `${hours}:${twoDigits(minutes)}:${twoDigits(seconds)}`
+    : `${twoDigits(minutes)}:${twoDigits(seconds)}`;
+}
+
+function updateAutomationTimer() {
+  const elapsedElement = document.querySelector("#flow-launcher-elapsed-time");
+  if (!elapsedElement || !automationStartedAt) {
+    return;
+  }
+  elapsedElement.textContent = formatElapsedTime(Date.now() - automationStartedAt);
+}
+
+function ensureAutomationTimer() {
+  if (!automationStartedAt) {
+    automationStartedAt = Date.now();
+  }
+  updateAutomationTimer();
+  if (automationTimerId == null) {
+    automationTimerId = setInterval(updateAutomationTimer, 1000);
+  }
+}
+
+function stopAutomationTimer() {
+  updateAutomationTimer();
+  if (automationTimerId != null) {
+    clearInterval(automationTimerId);
+    automationTimerId = null;
+  }
+}
+
 function showAutomationStatus(
   message,
   state = "working",
@@ -2312,55 +2367,144 @@ function showAutomationStatus(
   stage = null,
 ) {
   const workflowSnapshot = workflowState.update(message, state, progress, stage);
+  ensureAutomationTimer();
   let toast = document.querySelector("#flow-launcher-status");
 
   if (!toast) {
-    toast = document.createElement("div");
+    toast = document.createElement("section");
     toast.id = "flow-launcher-status";
+    toast.setAttribute("role", "dialog");
+    toast.setAttribute("aria-modal", "false");
+    toast.setAttribute("aria-labelledby", "flow-launcher-stage-label");
+    toast.setAttribute("aria-describedby", "flow-launcher-status-message");
     Object.assign(toast.style, {
       position: "fixed",
       top: "50%",
       left: "50%",
       transform: "translate(-50%, -50%)",
       zIndex: "2147483647",
-      width: "min(420px, calc(100vw - 40px))",
-      padding: "20px 24px",
-      border: "1px solid rgba(255, 255, 255, 0.16)",
-      borderRadius: "16px",
-      color: "#fff",
-      background: "#1f2937",
-      boxShadow: "0 20px 60px rgba(0, 0, 0, 0.45)",
-      font: "600 16px/1.5 system-ui, sans-serif",
-      textAlign: "center",
+      width: "min(460px, calc(100vw - 32px))",
+      overflow: "hidden",
+      border: "1px solid rgba(148, 163, 184, 0.28)",
+      borderRadius: "20px",
+      color: "#f8fafc",
+      background: "rgba(15, 23, 42, 0.96)",
+      boxShadow: "0 28px 80px rgba(0, 0, 0, 0.58)",
+      backdropFilter: "blur(18px)",
+      fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+      textAlign: "left",
+    });
+
+    const header = document.createElement("div");
+    Object.assign(header.style, {
+      display: "flex",
+      padding: "13px 16px",
+      gap: "12px",
+      alignItems: "center",
+      justifyContent: "space-between",
+      borderBottom: "1px solid rgba(148, 163, 184, 0.16)",
+      background: "rgba(255, 255, 255, 0.025)",
+    });
+
+    const brand = document.createElement("span");
+    Object.assign(brand.style, {
+      display: "flex",
+      gap: "8px",
+      alignItems: "center",
+      color: "#cbd5e1",
+      font: "650 11px/1.2 system-ui, sans-serif",
+    });
+    const statusDot = document.createElement("i");
+    statusDot.id = "flow-launcher-status-dot";
+    Object.assign(statusDot.style, {
+      width: "8px",
+      height: "8px",
+      flex: "0 0 auto",
+      borderRadius: "50%",
+      background: "#818cf8",
+      boxShadow: "0 0 12px rgba(129, 140, 248, 0.9)",
+    });
+    const buildElement = document.createElement("span");
+    buildElement.textContent = `Flow Launcher v${AUTOMATION_BUILD}`;
+    brand.append(statusDot, buildElement);
+
+    const timer = document.createElement("span");
+    Object.assign(timer.style, {
+      display: "flex",
+      padding: "6px 9px",
+      gap: "7px",
+      alignItems: "center",
+      border: "1px solid rgba(129, 140, 248, 0.25)",
+      borderRadius: "999px",
+      color: "#c7d2fe",
+      background: "rgba(99, 102, 241, 0.1)",
+      font: "700 12px/1 system-ui, sans-serif",
+      fontVariantNumeric: "tabular-nums",
+    });
+    const timerLabel = document.createElement("span");
+    timerLabel.textContent = "เวลาที่ใช้";
+    Object.assign(timerLabel.style, {
+      color: "#94a3b8",
+      fontSize: "9px",
+      fontWeight: "600",
+    });
+    const elapsedElement = document.createElement("span");
+    elapsedElement.id = "flow-launcher-elapsed-time";
+    elapsedElement.textContent = "00:00";
+    timer.append(timerLabel, elapsedElement);
+    header.append(brand, timer);
+
+    const content = document.createElement("div");
+    Object.assign(content.style, { padding: "17px 17px 15px" });
+
+    const stageElement = document.createElement("div");
+    stageElement.id = "flow-launcher-stage-label";
+    Object.assign(stageElement.style, {
+      marginBottom: "7px",
+      color: "#a5b4fc",
+      font: "750 10px/1.25 system-ui, sans-serif",
+      letterSpacing: "0.06em",
     });
 
     const messageElement = document.createElement("div");
     messageElement.id = "flow-launcher-status-message";
+    messageElement.setAttribute("aria-live", "polite");
+    Object.assign(messageElement.style, {
+      minHeight: "48px",
+      color: "#f8fafc",
+      font: "650 16px/1.55 system-ui, sans-serif",
+      overflowWrap: "anywhere",
+    });
 
     const progressMeta = document.createElement("div");
     progressMeta.id = "flow-launcher-progress-meta";
     Object.assign(progressMeta.style, {
       display: "flex",
-      marginTop: "14px",
+      marginTop: "15px",
       alignItems: "center",
       justifyContent: "space-between",
-      color: "rgba(255, 255, 255, 0.78)",
-      font: "600 12px/1.2 system-ui, sans-serif",
+      color: "#94a3b8",
+      font: "600 11px/1.2 system-ui, sans-serif",
     });
     const progressLabel = document.createElement("span");
-    progressLabel.textContent = "ความคืบหน้า";
+    progressLabel.textContent = "ความคืบหน้าโดยรวม";
     const progressValue = document.createElement("span");
     progressValue.id = "flow-launcher-progress-value";
+    Object.assign(progressValue.style, {
+      color: "#e0e7ff",
+      fontWeight: "750",
+      fontVariantNumeric: "tabular-nums",
+    });
     progressMeta.append(progressLabel, progressValue);
 
     const progressTrack = document.createElement("div");
     progressTrack.id = "flow-launcher-progress-track";
     Object.assign(progressTrack.style, {
-      height: "8px",
-      marginTop: "7px",
+      height: "7px",
+      marginTop: "8px",
       overflow: "hidden",
       borderRadius: "999px",
-      background: "rgba(255, 255, 255, 0.16)",
+      background: "rgba(148, 163, 184, 0.16)",
     });
     const progressBar = document.createElement("div");
     progressBar.id = "flow-launcher-progress-bar";
@@ -2368,19 +2512,11 @@ function showAutomationStatus(
       width: "0%",
       height: "100%",
       borderRadius: "inherit",
-      background: "linear-gradient(90deg, #a78bfa, #60a5fa)",
+      background: "linear-gradient(90deg, #6366f1, #60a5fa)",
+      boxShadow: "0 0 14px rgba(96, 165, 250, 0.45)",
       transition: "width 500ms ease",
     });
     progressTrack.append(progressBar);
-
-    const buildElement = document.createElement("div");
-    buildElement.textContent = `Flow Launcher v${AUTOMATION_BUILD}`;
-    Object.assign(buildElement.style, {
-      marginBottom: "8px",
-      color: "rgba(255, 255, 255, 0.62)",
-      font: "500 11px/1.2 system-ui, sans-serif",
-      letterSpacing: "0.03em",
-    });
 
     const cancelButton = document.createElement("button");
     cancelButton.id = "flow-launcher-cancel";
@@ -2389,42 +2525,78 @@ function showAutomationStatus(
     Object.assign(cancelButton.style, {
       display: "block",
       width: "100%",
-      marginTop: "14px",
+      marginTop: "15px",
       padding: "10px 14px",
-      border: "1px solid rgba(254, 202, 202, 0.42)",
-      borderRadius: "10px",
-      color: "#fee2e2",
-      background: "rgba(127, 29, 29, 0.72)",
-      font: "600 14px/1.4 system-ui, sans-serif",
+      border: "1px solid rgba(248, 113, 113, 0.3)",
+      borderRadius: "11px",
+      color: "#fecaca",
+      background: "rgba(127, 29, 29, 0.28)",
+      font: "650 12px/1.4 system-ui, sans-serif",
       cursor: "pointer",
     });
     cancelButton.addEventListener("click", async () => {
       if (automationCancelled) {
         return;
       }
-
       automationCancelled = true;
       cancelButton.disabled = true;
-      messageElement.textContent = "กำลังยกเลิก…";
-      await chrome.runtime.sendMessage({ type: "cancelFlowAutomation" }).catch(() => { });
-      messageElement.textContent = "ยกเลิกการทำงานแล้ว";
-      cancelButton.hidden = true;
-      cancelButton.style.display = "none";
+      showAutomationStatus("กำลังยกเลิกการทำงาน…", "cancelled");
+      await chrome.runtime
+        .sendMessage({ type: "cancelFlowAutomation" })
+        .catch(() => { });
+      showAutomationStatus("ยกเลิกการทำงานแล้ว", "cancelled");
       setTimeout(() => toast.remove(), 2500);
     });
 
-    toast.append(buildElement, messageElement, progressMeta, progressTrack, cancelButton);
+    content.append(
+      stageElement,
+      messageElement,
+      progressMeta,
+      progressTrack,
+      cancelButton,
+    );
+    toast.append(header, content);
     document.documentElement.append(toast);
   }
 
-  toast.querySelector("#flow-launcher-status-message").textContent = message;
-  toast.querySelector("#flow-launcher-progress-value").textContent = `${workflowSnapshot.progress}%`;
-  toast.querySelector("#flow-launcher-progress-bar").style.width = `${workflowSnapshot.progress}%`;
+  const stageLabel = state === "cancelled"
+    ? "ยกเลิกการทำงาน"
+    : STAGE_DISPLAY_LABELS[workflowSnapshot.stage] || "กำลังดำเนินการ";
+  toast.querySelector("#flow-launcher-stage-label").textContent = stageLabel;
+  const messageElement = toast.querySelector("#flow-launcher-status-message");
+  messageElement.setAttribute(
+    "aria-live",
+    state === "error" ? "assertive" : "polite",
+  );
+  messageElement.textContent = message;
+  toast.querySelector("#flow-launcher-progress-value").textContent =
+    `${workflowSnapshot.progress}%`;
+  const progressBar = toast.querySelector("#flow-launcher-progress-bar");
+  progressBar.style.width = `${workflowSnapshot.progress}%`;
   const cancelButton = toast.querySelector("#flow-launcher-cancel");
   cancelButton.hidden = state !== "working" || automationCancelled;
   cancelButton.style.display = cancelButton.hidden ? "none" : "block";
   cancelButton.disabled = automationCancelled;
-  toast.style.background = state === "error" ? "#991b1b" : "#1f2937";
+
+  const statusDot = toast.querySelector("#flow-launcher-status-dot");
+  const visualState = state === "error"
+    ? { border: "rgba(248, 113, 113, 0.48)", dot: "#f87171", bar: "#ef4444" }
+    : state === "success"
+      ? { border: "rgba(74, 222, 128, 0.4)", dot: "#4ade80", bar: "#22c55e" }
+      : state === "cancelled"
+        ? { border: "rgba(148, 163, 184, 0.3)", dot: "#94a3b8", bar: "#64748b" }
+        : { border: "rgba(129, 140, 248, 0.42)", dot: "#818cf8", bar: "#60a5fa" };
+  toast.style.borderColor = visualState.border;
+  statusDot.style.background = visualState.dot;
+  statusDot.style.boxShadow = `0 0 12px ${visualState.dot}`;
+  progressBar.style.background =
+    state === "working"
+      ? "linear-gradient(90deg, #6366f1, #60a5fa)"
+      : visualState.bar;
+  updateAutomationTimer();
+  if (state !== "working") {
+    stopAutomationTimer();
+  }
 
   void chrome.runtime.sendMessage({
     type: "flowAutomationStatus",
