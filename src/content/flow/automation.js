@@ -17,6 +17,7 @@ const {
   IMAGE_GENERATION_REPEAT_MIN_WAIT_MS,
   IMAGE_GENERATION_TIMEOUT_MS,
   INGREDIENT_SETTLE_DELAY_MS,
+  POST_UPLOAD_READY_DELAY_MS,
   PROJECT_SETTLE_DELAY_MS,
   PROMPT_VERIFY_DELAY_MS,
   RETRY_INTERVAL_MS,
@@ -1145,6 +1146,13 @@ async function addAssetAsIngredient(imageName, promptField) {
   // Do not wait for Flow's changing Ingredient DOM. Give the composer time to
   // finish its animation, then continue directly to prompt entry.
   await delay(INGREDIENT_SETTLE_DELAY_MS);
+  showAutomationStatus(
+    "รูปเข้า Prompt แล้ว กำลังรอ Flow เตรียมรูปให้พร้อม…",
+    "working",
+    null,
+    WORKFLOW_STAGES.SOURCE_MEDIA,
+  );
+  await delay(POST_UPLOAD_READY_DELAY_MS);
   return findPromptField() || promptField;
 }
 
@@ -1283,6 +1291,13 @@ async function attachImageViaAddToPrompt(promptField, image) {
   // Do not wait for Flow's changing Ingredient DOM. Give the composer time to
   // finish its animation, then continue directly to prompt entry.
   await delay(INGREDIENT_SETTLE_DELAY_MS);
+  showAutomationStatus(
+    "อัปโหลดและเพิ่มรูปเข้า Prompt แล้ว กำลังรอ Flow เตรียมรูปให้พร้อม…",
+    "working",
+    null,
+    WORKFLOW_STAGES.SOURCE_MEDIA,
+  );
+  await delay(POST_UPLOAD_READY_DELAY_MS);
   return findPromptField() || promptField;
 }
 
