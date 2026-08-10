@@ -15,6 +15,9 @@ const clipCount = document.querySelector("#clipCount");
 const fileName = document.querySelector("#fileName");
 const cancelButton = document.querySelector("#cancelAutomation");
 const syncTiktokBtn = document.querySelector("#syncTiktokBtn");
+const cancelSyncBtn = document.querySelector("#cancelSyncBtn");
+const clearSyncBtn = document.querySelector("#clearSyncBtn");
+const syncMaxPages = document.querySelector("#syncMaxPages");
 const tiktokIdOutput = document.querySelector("#tiktokIdOutput");
 const tiktokSyncStatus = document.querySelector("#tiktokSyncStatus");
 
@@ -218,21 +221,34 @@ syncTiktokBtn.addEventListener("click", async () => {
     return;
   }
 
-  syncTiktokBtn.disabled = true;
-  syncTiktokBtn.textContent = "กำลังกวาดข้อมูลอัตโนมัติ...";
+  const maxPagesValue = Number(syncMaxPages.value) || 5;
+
+  // จัดการ UI ปุ่ม
+  syncTiktokBtn.style.display = "none";
+  cancelSyncBtn.style.display = "flex";
+  cancelSyncBtn.disabled = false;
+  syncMaxPages.disabled = true;
+
+  clearSyncBtn.disabled = true;
+  clearSyncBtn.style.opacity = "0.5";
+  clearSyncBtn.style.cursor = "not-allowed";
+
   tiktokSyncStatus.style.display = "block";
-  tiktokSyncStatus.textContent = "กำลังเริ่มดึงข้อมูล...";
+  tiktokSyncStatus.textContent = `กำลังเริ่มดึงข้อมูล (ตั้งเป้า ${maxPagesValue} หน้า)...`;
   tiktokSyncStatus.style.color = "#60a5fa";
 
-  // ล้างหน้าจอและรีเซ็ตเลขลำดับเป็น 0
   tiktokIdOutput.innerHTML = "";
   tiktokIdOutput.style.display = "flex";
   globalItemCount = 0;
 
-  // สั่งให้ Scraper เริ่มทำงาน
-  chrome.tabs.sendMessage(tab.id, { type: "START_PAGINATION_SCRAPE" }, (response) => {
-    syncTiktokBtn.disabled = false;
-    syncTiktokBtn.textContent = "ดึงข้อมูลสินค้าจากหน้าปัจจุบัน";
+  chrome.tabs.sendMessage(tab.id, { type: "START_PAGINATION_SCRAPE", maxPages: maxPagesValue }, (response) => {
+    syncTiktokBtn.style.display = "flex";
+    cancelSyncBtn.style.display = "none";
+    syncMaxPages.disabled = false;
+
+    clearSyncBtn.disabled = false;
+    clearSyncBtn.style.opacity = "1";
+    clearSyncBtn.style.cursor = "pointer";
 
     if (chrome.runtime.lastError) {
       tiktokSyncStatus.textContent = "พบข้อผิดพลาด กรุณารีเฟรชหน้า TikTok แล้วลองใหม่";
@@ -243,29 +259,63 @@ syncTiktokBtn.addEventListener("click", async () => {
     if (response && response.status === "done") {
       tiktokSyncStatus.textContent = `ดึงข้อมูลเสร็จสมบูรณ์! ได้ทั้งหมด ${globalItemCount} รายการ`;
       tiktokSyncStatus.style.color = "#4ade80";
+    } else if (response && response.status === "cancelled") {
+      tiktokSyncStatus.textContent = `ยกเลิกแล้ว! ได้มาทั้งหมด ${globalItemCount} รายการ`;
+      tiktokSyncStatus.style.color = "#fbbf24";
     }
   });
 });
 
+syncMaxPages.addEventListener("input", function () {
+  // 1. แทนที่สิ่งที่พิมพ์เข้ามา ที่ไม่ใช่ตัวเลข (0-9) ให้หายไป (กันติดลบ, กันพิมพ์ตัวอักษร, กันจุดทศนิยม)
+  this.value = this.value.replace(/[^0-9]/g, "");
+
+  // 2. ถ้าเผลอพิมพ์เลขเกิน 100 (เช่น 101) ให้ล็อกกลับมาที่ 100 (เพื่อป้องกันลูปทำงานหนักเกินไป)
+  if (Number(this.value) > 100) {
+    this.value = "100";
+  }
+});
+
+syncMaxPages.addEventListener("blur", function () {
+  // 3. เมื่อคลิกเมาส์ออกนอกช่อง ถ้าลบจนโล่ง หรือพิมพ์ 0 เอาไว้ ให้บังคับกลับเป็น 1 เสมอ
+  if (!this.value || Number(this.value) < 1) {
+    this.value = "1";
+  }
+});
+
 // ฟังก์ชันรับข้อมูลทีละหน้า (Chunk) จาก scraper.js มาแสดงผล Real-time
+cancelSyncBtn.addEventListener("click", async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  cancelSyncBtn.disabled = true;
+  chrome.tabs.sendMessage(tab.id, { type: "CANCEL_PAGINATION_SCRAPE" });
+});
+
+clearSyncBtn.addEventListener("click", () => {
+  tiktokIdOutput.innerHTML = "";
+  tiktokIdOutput.style.display = "none";
+  tiktokSyncStatus.style.display = "none";
+  tiktokSyncStatus.textContent = "";
+  globalItemCount = 0;
+});
+
+// ฟังก์ชันนี้มีแค่ตัวเดียวแล้ว! จะไม่ทำให้ข้อมูลเบิ้ลซ้ำอีก
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "TIKTOK_SCRAPE_CHUNK") {
     const products = message.data;
 
-    // อัปเดตสถานะให้ผู้ใช้เห็นว่ากำลังดึงถึงหน้าไหนแล้ว
     tiktokSyncStatus.textContent = `กำลังกวาดหน้า ${message.page}... ได้มาแล้ว ${message.total} รายการ`;
 
-    // นำสินค้าหน้าล่าสุดมาวาดต่อท้าย
     products.forEach((product) => {
-      globalItemCount++; // รันเลขลำดับ 1, 2, 3...
+      globalItemCount++;
 
       const item = document.createElement("div");
       item.style.display = "flex";
       item.style.alignItems = "center";
       item.style.gap = "12px";
       item.style.padding = "10px";
-      item.style.background = "#27272a";
+      item.style.background = "var(--bg-surface-elevated, #27272a)";
       item.style.borderRadius = "8px";
+      item.style.border = "1px solid var(--border-subtle, #3f3f46)";
 
       const num = document.createElement("div");
       num.textContent = `${globalItemCount}.`;
@@ -288,7 +338,6 @@ chrome.runtime.onMessage.addListener((message) => {
       details.style.minWidth = "0";
 
       const name = document.createElement("div");
-      // กรองเอา ID ที่อาจจะหลุดติดมากับชื่อออก
       let cleanName = product.name.replace(product.id, '').trim();
       name.textContent = cleanName;
       name.title = cleanName;
@@ -315,7 +364,6 @@ chrome.runtime.onMessage.addListener((message) => {
       tiktokIdOutput.appendChild(item);
     });
 
-    // ดัน Scroll bar ลงมาล่างสุดอัตโนมัติ เพื่อให้เห็นสินค้าใหม่ที่เพิ่งเข้ามา
     tiktokIdOutput.scrollTop = tiktokIdOutput.scrollHeight;
   }
 });

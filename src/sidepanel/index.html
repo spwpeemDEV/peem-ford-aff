@@ -8,6 +8,7 @@
   </head>
   <body>
     <main class="panel">
+      <!-- ส่วน Header -->
       <header class="topbar">
         <div class="brand-lockup">
           <span class="brand-mark" aria-hidden="true">✦</span>
@@ -15,6 +16,8 @@
         </div>
         <span id="versionLabel" class="version-pill">v—</span>
       </header>
+
+      <!-- ส่วนที่ 1: ตั้งค่าโปรเจกต์ (Flow AI) -->
       <section class="workflow-card" aria-label="ตั้งค่าการสร้างภาพและวิดีโอ">
         <div class="card-heading">
           <div>
@@ -104,6 +107,7 @@
         </div>
       </section>
 
+      <!-- ส่วนที่ 2: แสดงสถานะการทำงาน (Flow AI) -->
       <section id="statusCard" class="status-card" data-state="idle" hidden>
         <div class="status-heading">
           <span class="status-label"><i></i> PROCESS</span>
@@ -115,6 +119,7 @@
         <div id="status" class="status" role="status" aria-live="polite"></div>
       </section>
 
+      <!-- ส่วนที่ 3: ปุ่มเริ่ม/ยกเลิก (Flow AI) -->
       <div class="action-dock">
         <button id="startPrompt" class="primary-button" type="button">
           <span>
@@ -133,74 +138,113 @@
           <span aria-hidden="true">×</span>
         </button>
       </div>
-      <!-- ซิงก์ข้อมูล TikTok -->
-      <div
-        style="
-          margin-bottom: 24px;
-          padding: 16px;
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: 12px;
-        "
-      >
-        <div
-          style="
-            font-size: 11px;
-            font-weight: 600;
-            color: #a1a1aa;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-            margin-bottom: 12px;
-          "
-        >
-          TikTok Sync
+
+      <!-- ส่วนที่ 4: ซิงก์ข้อมูล TikTok (ปรับดีไซน์ใหม่) -->
+      <section class="workflow-card" aria-label="ซิงก์ข้อมูล TikTok">
+        <div class="card-heading">
+          <div>
+            <p class="section-kicker">TIKTOK SYNC</p>
+            <h2>ดึงข้อมูลสินค้า</h2>
+          </div>
         </div>
-        <button
-          id="syncTiktokBtn"
-          type="button"
-          style="
-            width: 100%;
-            padding: 10px;
-            background: #3f3f46;
-            color: #fff;
-            border: 1px solid #52525b;
-            border-radius: 8px;
-            font-weight: 500;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-          "
-        >
-          ดึง ID สินค้าจากหน้าปัจจุบัน
-        </button>
-        <div
-          id="tiktokIdOutput"
-          style="
-            width: 100%;
-            max-height: 350px;
-            overflow-y: auto;
-            margin-top: 12px;
-            padding: 8px;
-            background: #18181b;
-            border: 1px solid #3f3f46;
-            border-radius: 6px;
-            display: none;
-            flex-direction: column;
-            gap: 8px;
-          "
-        ></div>
-        <div
-          id="tiktokSyncStatus"
-          style="
-            font-size: 12px;
-            color: #60a5fa;
-            margin-top: 8px;
-            text-align: center;
-            display: none;
-          "
-        ></div>
-      </div>
+
+        <div class="automation-form">
+          <label class="field compact-field" for="syncMaxPages">
+            <span>
+              <strong>จำนวนหน้าที่ต้องการดึง</strong>
+              <small>ระบุจำนวนหน้า (1-100)</small>
+            </span>
+            <span class="input-shell" style="width: 80px; text-align: center">
+              <input
+                type="number"
+                id="syncMaxPages"
+                value="5"
+                min="1"
+                max="100"
+                style="
+                  width: 100%;
+                  background: transparent;
+                  border: none;
+                  color: #fff;
+                  text-align: center;
+                  font-size: 14px;
+                  outline: none;
+                "
+              />
+            </span>
+          </label>
+
+          <!-- ข้อความบอกสถานะ TikTok Sync -->
+          <div
+            id="tiktokSyncStatus"
+            style="
+              font-size: 12px;
+              color: #60a5fa;
+              margin-top: 4px;
+              margin-bottom: 8px;
+              text-align: center;
+              display: none;
+            "
+          ></div>
+
+          <!-- พื้นที่แสดงผลรายการสินค้า -->
+          <div
+            id="tiktokIdOutput"
+            style="
+              width: 100%;
+              max-height: 250px;
+              overflow-y: auto;
+              background: #18181b;
+              border: 1px solid #3f3f46;
+              border-radius: 8px;
+              display: none;
+              flex-direction: column;
+              gap: 8px;
+              padding: 8px;
+            "
+          ></div>
+        </div>
+
+        <!-- กลุ่มปุ่มการทำงาน (TikTok Sync) -->
+        <div class="action-dock" style="margin-top: 16px">
+          <button
+            id="syncTiktokBtn"
+            class="primary-button"
+            type="button"
+            style="flex: 1"
+          >
+            <span>
+              <small>START SCRAPING</small>
+              เริ่มกวาดข้อมูล
+            </span>
+          </button>
+
+          <button
+            id="cancelSyncBtn"
+            class="cancel-button"
+            type="button"
+            style="flex: 1; display: none"
+          >
+            <span>ยกเลิกการดึง</span>
+            <span aria-hidden="true">×</span>
+          </button>
+
+          <button
+            id="clearSyncBtn"
+            class="cancel-button"
+            type="button"
+            style="
+              flex: 0 0 auto;
+              background: transparent;
+              border: 1px solid #3f3f46;
+              color: #d4d4d8;
+            "
+            title="ล้างรายการทั้งหมด"
+          >
+            <span>ล้าง</span>
+          </button>
+        </div>
+      </section>
     </main>
 
     <script src="app.js"></script>
