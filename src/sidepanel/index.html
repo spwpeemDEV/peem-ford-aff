@@ -17,6 +17,32 @@
         <span id="versionLabel" class="version-pill">v—</span>
       </header>
 
+      <nav class="panel-tabs" aria-label="เมนูหลัก">
+        <button
+          class="panel-tab is-active"
+          type="button"
+          data-panel-target="creationPage"
+          aria-controls="creationPage"
+          aria-selected="true"
+        >
+          <span class="panel-tab-icon" aria-hidden="true">✦</span>
+          <span>สร้างคลิป</span>
+        </button>
+        <button
+          id="openBasketPage"
+          class="panel-tab"
+          type="button"
+          data-panel-target="basketPage"
+          aria-controls="basketPage"
+          aria-selected="false"
+        >
+          <span class="panel-tab-icon" aria-hidden="true">🛒</span>
+          <span>ปักตะกร้าสินค้า</span>
+        </button>
+      </nav>
+
+      <div id="creationPage" class="sidebar-page is-active" data-panel-page>
+
       <!-- ส่วนที่ 1: ตั้งค่าโปรเจกต์ (Flow AI) -->
       <section class="workflow-card" aria-label="ตั้งค่าการสร้างภาพและวิดีโอ">
         <div class="card-heading">
@@ -160,109 +186,231 @@
         </button>
       </div>
 
-      <!-- ส่วนที่ 4: ซิงก์ข้อมูล TikTok (ปรับดีไซน์ใหม่) -->
-      <section class="workflow-card" aria-label="ซิงก์ข้อมูล TikTok">
-        <div class="card-heading">
-          <div>
-            <p class="section-kicker">TIKTOK SYNC</p>
-            <h2>ดึงข้อมูลสินค้า</h2>
+      </div>
+
+      <section
+        id="basketPage"
+        class="sidebar-page basket-page"
+        data-panel-page
+        hidden
+        aria-labelledby="basketPageTitle"
+      >
+        <button id="backToCreation" class="page-back-button" type="button">
+          <span aria-hidden="true">←</span>
+          กลับไปหน้าสร้างคลิป
+        </button>
+
+        <!-- ซิงก์สินค้าอยู่บนสุดของหน้าปักตะกร้า -->
+        <section id="productSyncCard" class="workflow-card product-sync-card" aria-label="ซิงก์ข้อมูล TikTok">
+          <div class="card-heading">
+            <div>
+              <p class="section-kicker">TIKTOK SYNC</p>
+              <h2>ดึงข้อมูลสินค้า</h2>
+            </div>
+            <span id="productResultCount" class="product-result-count">0 สินค้า</span>
           </div>
+
+          <p class="product-sync-hint">
+            ดึงรายการจาก TikTok แล้วคลิกสินค้าเพื่อผูก Product ID เข้ากับวิดีโอ
+          </p>
+
+          <div class="automation-form">
+            <label class="field compact-field" for="syncMaxPages">
+              <span>
+                <strong>จำนวนหน้าที่ต้องการดึง</strong>
+                <small>ระบุจำนวนหน้า (1-100)</small>
+              </span>
+              <span class="input-shell" style="width: 80px; text-align: center">
+                <input
+                  type="number"
+                  id="syncMaxPages"
+                  value="5"
+                  min="1"
+                  max="100"
+                  style="
+                    width: 100%;
+                    background: transparent;
+                    border: none;
+                    color: #fff;
+                    text-align: center;
+                    font-size: 14px;
+                    outline: none;
+                  "
+                />
+              </span>
+            </label>
+
+            <div id="tiktokSyncStatus" class="tiktok-sync-status" hidden></div>
+
+            <label id="productSearchField" class="product-search-field" for="syncedProductSearch" hidden>
+              <span aria-hidden="true">⌕</span>
+              <input
+                id="syncedProductSearch"
+                type="search"
+                autocomplete="off"
+                placeholder="ค้นหาชื่อสินค้า หรือ Product ID"
+              />
+            </label>
+
+            <div
+              id="tiktokIdOutput"
+              class="synced-product-list"
+              role="listbox"
+              aria-label="สินค้าที่ดึงจาก TikTok"
+              hidden
+            ></div>
+          </div>
+
+          <div class="action-dock" style="margin-top: 16px">
+            <button
+              id="syncTiktokBtn"
+              class="primary-button"
+              type="button"
+              style="flex: 1"
+            >
+              <span>
+                <small>START SCRAPING</small>
+                เริ่มกวาดข้อมูล
+              </span>
+            </button>
+
+            <button
+              id="cancelSyncBtn"
+              class="cancel-button"
+              type="button"
+              style="flex: 1; display: none"
+            >
+              <span>ยกเลิกการดึง</span>
+              <span aria-hidden="true">×</span>
+            </button>
+
+            <button
+              id="clearSyncBtn"
+              class="cancel-button"
+              type="button"
+              style="
+                flex: 0 0 auto;
+                background: transparent;
+                border: 1px solid #3f3f46;
+                color: #d4d4d8;
+              "
+              title="ล้างรายการทั้งหมด"
+            >
+              <span>ล้าง</span>
+            </button>
+          </div>
+        </section>
+
+        <div class="basket-hero-card">
+          <span class="basket-hero-icon" aria-hidden="true">🛒</span>
+          <p class="section-kicker">TIKTOK PRODUCT</p>
+          <h1 id="basketPageTitle">ปักตะกร้าสินค้า</h1>
+          <p>
+            หน้านี้เตรียมไว้สำหรับเลือกวิดีโอและเชื่อมสินค้าเข้ากับโพสต์ TikTok
+          </p>
         </div>
 
-        <div class="automation-form">
-          <label class="field compact-field" for="syncMaxPages">
-            <span>
-              <strong>จำนวนหน้าที่ต้องการดึง</strong>
-              <small>ระบุจำนวนหน้า (1-100)</small>
+        <div class="basket-form-card">
+          <label class="field upload-field basket-video-field">
+            <span class="field-heading">
+              <span class="step-number">01</span>
+              <span>
+                <strong>อัปโหลดวิดีโอ</strong>
+                <small>เลือกไฟล์ MP4, MOV หรือ WEBM จากเครื่อง</small>
+              </span>
             </span>
-            <span class="input-shell" style="width: 80px; text-align: center">
-              <input
-                type="number"
-                id="syncMaxPages"
-                value="5"
-                min="1"
-                max="100"
-                style="
-                  width: 100%;
-                  background: transparent;
-                  border: none;
-                  color: #fff;
-                  text-align: center;
-                  font-size: 14px;
-                  outline: none;
-                "
-              />
+            <span class="file-picker basket-file-picker">
+              <span class="preview-shell basket-video-icon" aria-hidden="true">▶</span>
+              <span class="file-copy">
+                <strong id="basketVideoFileName">เลือกวิดีโอ</strong>
+                <small id="basketVideoFileMeta">คลิกเพื่อเลือกไฟล์ที่ต้องการโพสต์</small>
+              </span>
+              <span class="picker-arrow" aria-hidden="true">›</span>
+            </span>
+            <input
+              id="basketVideoInput"
+              type="file"
+              accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
+            />
+          </label>
+
+          <label class="field" for="basketCaption">
+            <span class="field-heading">
+              <span class="step-number">02</span>
+              <span>
+                <strong>ข้อความและแฮชแท็ก</strong>
+                <small>เตรียมข้อความสำหรับใส่ในโพสต์ TikTok</small>
+              </span>
+            </span>
+            <span class="input-shell basket-caption-shell">
+              <textarea
+                id="basketCaption"
+                rows="5"
+                maxlength="4000"
+                placeholder="เขียนข้อความโพสต์...&#10;&#10;#สินค้า #รีวิวสินค้า #TikTokShop"
+              ></textarea>
+              <span id="basketCaptionCount" class="input-tag">0 / 4000</span>
             </span>
           </label>
 
-          <!-- ข้อความบอกสถานะ TikTok Sync -->
-          <div
-            id="tiktokSyncStatus"
-            style="
-              font-size: 12px;
-              color: #60a5fa;
-              margin-top: 4px;
-              margin-bottom: 8px;
-              text-align: center;
-              display: none;
-            "
-          ></div>
-
-          <!-- พื้นที่แสดงผลรายการสินค้า -->
-          <div
-            id="tiktokIdOutput"
-            style="
-              width: 100%;
-              max-height: 250px;
-              overflow-y: auto;
-              background: #18181b;
-              border: 1px solid #3f3f46;
-              border-radius: 8px;
-              display: none;
-              flex-direction: column;
-              gap: 8px;
-              padding: 8px;
-            "
-          ></div>
-        </div>
-
-        <!-- กลุ่มปุ่มการทำงาน (TikTok Sync) -->
-        <div class="action-dock" style="margin-top: 16px">
-          <button
-            id="syncTiktokBtn"
-            class="primary-button"
-            type="button"
-            style="flex: 1"
-          >
-            <span>
-              <small>START SCRAPING</small>
-              เริ่มกวาดข้อมูล
+          <section class="basket-product-step" aria-labelledby="basketProductTitle">
+            <span class="field-heading">
+              <span class="step-number">03</span>
+              <span>
+                <strong id="basketProductTitle">เลือกสินค้าที่จะปักตะกร้า</strong>
+                <small>เลือก 1 รายการจากสินค้า TikTok Sync เพื่อผูก Product ID</small>
+              </span>
             </span>
-          </button>
 
-          <button
-            id="cancelSyncBtn"
-            class="cancel-button"
-            type="button"
-            style="flex: 1; display: none"
-          >
-            <span>ยกเลิกการดึง</span>
-            <span aria-hidden="true">×</span>
-          </button>
+            <button id="chooseSyncedProduct" class="choose-product-button" type="button">
+              <span class="choose-product-icon" aria-hidden="true">＋</span>
+              <span>
+                <strong>เลือกสินค้าจากรายการด้านบน</strong>
+                <small>ยังไม่ได้เลือก Product ID</small>
+              </span>
+              <span aria-hidden="true">↑</span>
+            </button>
 
-          <button
-            id="clearSyncBtn"
-            class="cancel-button"
-            type="button"
-            style="
-              flex: 0 0 auto;
-              background: transparent;
-              border: 1px solid #3f3f46;
-              color: #d4d4d8;
-            "
-            title="ล้างรายการทั้งหมด"
-          >
-            <span>ล้าง</span>
+            <article id="selectedProductCard" class="selected-product-card" hidden>
+              <img id="selectedProductImage" alt="" />
+              <span class="selected-product-copy">
+                <strong id="selectedProductName"></strong>
+                <small id="selectedProductId"></small>
+              </span>
+              <button id="changeSelectedProduct" type="button">เปลี่ยน</button>
+            </article>
+          </section>
+
+          <section class="basket-bundle-summary" aria-labelledby="basketBundleTitle">
+            <div class="bundle-summary-heading">
+              <span>
+                <small>POST PACKAGE</small>
+                <strong id="basketBundleTitle">ชุดงานพร้อมโพสต์</strong>
+              </span>
+              <span id="basketBundleProgress" class="bundle-progress">0 / 3</span>
+            </div>
+            <div class="bundle-summary-row" data-bundle-item="video">
+              <span class="bundle-check" aria-hidden="true">1</span>
+              <span><strong>วิดีโอ</strong><small id="bundleVideoValue">ยังไม่ได้เลือก</small></span>
+            </div>
+            <div class="bundle-summary-row" data-bundle-item="caption">
+              <span class="bundle-check" aria-hidden="true">2</span>
+              <span><strong>ข้อความและแฮชแท็ก</strong><small id="bundleCaptionValue">ยังไม่ได้กรอก</small></span>
+            </div>
+            <div class="bundle-summary-row" data-bundle-item="product">
+              <span class="bundle-check" aria-hidden="true">3</span>
+              <span><strong>สินค้า</strong><small id="bundleProductValue">ยังไม่ได้เลือก Product ID</small></span>
+            </div>
+          </section>
+
+          <div id="basketStatus" class="basket-status" role="status" aria-live="polite"></div>
+
+          <button id="startBasketFlow" class="primary-button basket-start-button" type="button" disabled>
+            <span>
+              <small>START TIKTOK FLOW</small>
+              เริ่มปักตะกร้า
+            </span>
+            <span class="button-icon" aria-hidden="true">→</span>
           </button>
         </div>
       </section>

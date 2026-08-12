@@ -19,13 +19,403 @@ const clearSyncBtn = document.querySelector("#clearSyncBtn");
 const syncMaxPages = document.querySelector("#syncMaxPages");
 const tiktokIdOutput = document.querySelector("#tiktokIdOutput");
 const tiktokSyncStatus = document.querySelector("#tiktokSyncStatus");
+const productResultCount = document.querySelector("#productResultCount");
+const productSearchField = document.querySelector("#productSearchField");
+const syncedProductSearch = document.querySelector("#syncedProductSearch");
+const productSyncCard = document.querySelector("#productSyncCard");
+const panelTabs = [...document.querySelectorAll("[data-panel-target]")];
+const panelPages = [...document.querySelectorAll("[data-panel-page]")];
+const backToCreationButton = document.querySelector("#backToCreation");
+const basketVideoInput = document.querySelector("#basketVideoInput");
+const basketVideoFileName = document.querySelector("#basketVideoFileName");
+const basketVideoFileMeta = document.querySelector("#basketVideoFileMeta");
+const basketCaption = document.querySelector("#basketCaption");
+const basketCaptionCount = document.querySelector("#basketCaptionCount");
+const basketStatus = document.querySelector("#basketStatus");
+const startBasketFlowButton = document.querySelector("#startBasketFlow");
+const chooseSyncedProductButton = document.querySelector("#chooseSyncedProduct");
+const selectedProductCard = document.querySelector("#selectedProductCard");
+const selectedProductImage = document.querySelector("#selectedProductImage");
+const selectedProductName = document.querySelector("#selectedProductName");
+const selectedProductId = document.querySelector("#selectedProductId");
+const changeSelectedProductButton = document.querySelector("#changeSelectedProduct");
+const basketBundleProgress = document.querySelector("#basketBundleProgress");
+const bundleVideoValue = document.querySelector("#bundleVideoValue");
+const bundleCaptionValue = document.querySelector("#bundleCaptionValue");
+const bundleProductValue = document.querySelector("#bundleProductValue");
+const basketBundleRows = [...document.querySelectorAll("[data-bundle-item]")];
 
 let activeTabId = null;
 let nextProductId = 1;
 const previewUrls = new Map();
 const MAX_PRODUCTS = 10;
+let stagedBasketVideo = null;
+let syncedProducts = [];
+let selectedBasketProduct = null;
+let basketFlowRunning = false;
 
 versionLabel.textContent = `v${chrome.runtime.getManifest().version}`;
+
+function showPanelPage(pageId, { updateHash = true } = {}) {
+  const targetPage = panelPages.find((page) => page.id === pageId);
+  if (!targetPage) {
+    return;
+  }
+
+  for (const page of panelPages) {
+    const active = page === targetPage;
+    page.hidden = !active;
+    page.classList.toggle("is-active", active);
+  }
+
+  for (const tab of panelTabs) {
+    const active = tab.dataset.panelTarget === pageId;
+    tab.classList.toggle("is-active", active);
+    tab.setAttribute("aria-selected", String(active));
+  }
+
+  if (updateHash) {
+    history.replaceState(null, "", pageId === "basketPage" ? "#basket" : "#create");
+  }
+  document.querySelector(".panel")?.scrollTo({ top: 0, behavior: "smooth" });
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+for (const tab of panelTabs) {
+  tab.addEventListener("click", () => showPanelPage(tab.dataset.panelTarget));
+}
+
+backToCreationButton?.addEventListener("click", () => {
+  showPanelPage("creationPage");
+});
+
+showPanelPage(location.hash === "#basket" ? "basketPage" : "creationPage", {
+  updateHash: false,
+});
+
+function formatFileSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 MB";
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 1 : 2)} MB`;
+}
+
+function sanitizeUploadFilename(filename) {
+  const safeName = String(filename || "video.mp4")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .slice(-120);
+  return safeName || "video.mp4";
+}
+
+function waitForDownloadComplete(downloadId, timeoutMs = 15 * 60 * 1000) {
+  return new Promise((resolve, reject) => {
+    let timeoutId;
+    const cleanup = () => {
+      clearTimeout(timeoutId);
+      chrome.downloads.onChanged.removeListener(onChanged);
+    };
+    const onChanged = (delta) => {
+      if (delta.id !== downloadId || !delta.state?.current) return;
+      if (delta.state.current === "complete") {
+        cleanup();
+        resolve();
+      } else if (delta.state.current === "interrupted") {
+        cleanup();
+        reject(new Error(delta.error?.current || "คัดลอกวิดีโอไม่สำเร็จ"));
+      }
+    };
+    chrome.downloads.onChanged.addListener(onChanged);
+    timeoutId = setTimeout(() => {
+      cleanup();
+      reject(new Error("หมดเวลารอเตรียมไฟล์วิดีโอ"));
+    }, timeoutMs);
+  });
+}
+
+async function stageBasketVideo(file) {
+  const fingerprint = `${file.name}:${file.size}:${file.lastModified}`;
+  if (stagedBasketVideo?.fingerprint === fingerprint) {
+    const [existingDownload] = await chrome.downloads.search({
+      id: stagedBasketVideo.downloadId,
+    });
+    if (existingDownload?.state === "complete" && existingDownload.filename) {
+      return stagedBasketVideo;
+    }
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const relativeFilename =
+      `FlowLauncher/temp/tiktok-${Date.now()}-${sanitizeUploadFilename(file.name)}`;
+    const downloadId = await chrome.downloads.download({
+      url: objectUrl,
+      filename: relativeFilename,
+      conflictAction: "uniquify",
+      saveAs: false,
+    });
+    await waitForDownloadComplete(downloadId);
+    const [downloadItem] = await chrome.downloads.search({ id: downloadId });
+    if (!downloadItem?.filename || downloadItem.state !== "complete") {
+      throw new Error("ไม่พบไฟล์วิดีโอชั่วคราวที่เตรียมไว้");
+    }
+    stagedBasketVideo = {
+      fingerprint,
+      downloadId,
+      localPath: downloadItem.filename,
+      originalName: file.name,
+    };
+    return stagedBasketVideo;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+function normalizeSyncedProduct(product) {
+  const id = String(product?.id || "").trim();
+  if (!id) return null;
+  const rawName = String(product?.name || "").trim();
+  const name = rawName.replace(id, "").trim() || `สินค้า ${id}`;
+  return {
+    id,
+    name,
+    imgUrl: String(product?.imgUrl || "").trim(),
+  };
+}
+
+function countHashtags(value) {
+  return (String(value || "").match(/(^|\s)#[^\s#]+/g) || []).length;
+}
+
+function scrollToProductPicker() {
+  productSyncCard?.scrollIntoView({ behavior: "smooth", block: "start" });
+  window.setTimeout(() => {
+    if (syncedProducts.length) {
+      syncedProductSearch?.focus();
+    } else {
+      syncTiktokBtn?.focus();
+    }
+  }, 250);
+}
+
+function updateBasketBundle() {
+  const file = basketVideoInput?.files?.[0] || null;
+  const caption = basketCaption?.value.trim() || "";
+  const completed = [Boolean(file), Boolean(caption), Boolean(selectedBasketProduct)];
+
+  bundleVideoValue.textContent = file
+    ? `${file.name} · ${formatFileSize(file.size)}`
+    : "ยังไม่ได้เลือก";
+  bundleCaptionValue.textContent = caption
+    ? `${caption.length} ตัวอักษร · ${countHashtags(caption)} แฮชแท็ก`
+    : "ยังไม่ได้กรอก";
+  bundleProductValue.textContent = selectedBasketProduct
+    ? `${selectedBasketProduct.name} · ID ${selectedBasketProduct.id}`
+    : "ยังไม่ได้เลือก Product ID";
+
+  basketBundleRows.forEach((row, index) => {
+    const complete = completed[index];
+    row.classList.toggle("is-complete", complete);
+    const check = row.querySelector(".bundle-check");
+    if (check) check.textContent = complete ? "✓" : String(index + 1);
+  });
+
+  const completeCount = completed.filter(Boolean).length;
+  basketBundleProgress.textContent = `${completeCount} / 3`;
+  basketBundleProgress.classList.toggle("is-complete", completeCount === 3);
+  startBasketFlowButton.disabled = basketFlowRunning || completeCount !== 3;
+  startBasketFlowButton.dataset.running = String(basketFlowRunning);
+}
+
+function updateSelectedProductCard() {
+  if (!selectedBasketProduct) {
+    selectedProductCard.hidden = true;
+    chooseSyncedProductButton.hidden = false;
+    updateBasketBundle();
+    return;
+  }
+
+  selectedProductImage.src = selectedBasketProduct.imgUrl;
+  selectedProductImage.alt = selectedBasketProduct.name;
+  selectedProductName.textContent = selectedBasketProduct.name;
+  selectedProductId.textContent = `Product ID: ${selectedBasketProduct.id}`;
+  chooseSyncedProductButton.hidden = true;
+  selectedProductCard.hidden = false;
+  updateBasketBundle();
+}
+
+function selectSyncedProduct(productId) {
+  selectedBasketProduct = syncedProducts.find((product) => product.id === productId) || null;
+  updateSelectedProductCard();
+  renderSyncedProducts();
+  if (selectedBasketProduct) {
+    basketStatus.textContent = `เลือก ${selectedBasketProduct.name} แล้ว ชุดงานนี้จะใช้ Product ID ${selectedBasketProduct.id}`;
+    basketStatus.dataset.state = "ready";
+  }
+}
+
+function renderSyncedProducts() {
+  const query = syncedProductSearch?.value.trim().toLocaleLowerCase("th") || "";
+  const visibleProducts = syncedProducts.filter((product) =>
+    `${product.name} ${product.id}`.toLocaleLowerCase("th").includes(query),
+  );
+
+  tiktokIdOutput.replaceChildren();
+  for (const product of visibleProducts) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "synced-product-item";
+    item.dataset.productId = product.id;
+    item.setAttribute("role", "option");
+    item.setAttribute("aria-selected", String(selectedBasketProduct?.id === product.id));
+    item.classList.toggle("is-selected", selectedBasketProduct?.id === product.id);
+
+    const image = document.createElement("img");
+    image.src = product.imgUrl;
+    image.alt = "";
+
+    const copy = document.createElement("span");
+    copy.className = "synced-product-copy";
+    const name = document.createElement("strong");
+    name.textContent = product.name;
+    name.title = product.name;
+    const id = document.createElement("small");
+    id.textContent = `Product ID: ${product.id}`;
+    copy.append(name, id);
+
+    const indicator = document.createElement("span");
+    indicator.className = "synced-product-indicator";
+    indicator.textContent = selectedBasketProduct?.id === product.id ? "✓" : "เลือก";
+    item.append(image, copy, indicator);
+    item.addEventListener("click", () => selectSyncedProduct(product.id));
+    tiktokIdOutput.appendChild(item);
+  }
+
+  if (!visibleProducts.length && syncedProducts.length) {
+    const empty = document.createElement("p");
+    empty.className = "synced-products-empty";
+    empty.textContent = "ไม่พบสินค้าที่ตรงกับคำค้น";
+    tiktokIdOutput.appendChild(empty);
+  }
+
+  productResultCount.textContent = `${syncedProducts.length} สินค้า`;
+  const hasProducts = syncedProducts.length > 0;
+  productSearchField.hidden = !hasProducts;
+  tiktokIdOutput.hidden = !hasProducts;
+}
+
+function resetSyncedProducts() {
+  syncedProducts = [];
+  selectedBasketProduct = null;
+  if (syncedProductSearch) syncedProductSearch.value = "";
+  renderSyncedProducts();
+  updateSelectedProductCard();
+}
+
+syncedProductSearch?.addEventListener("input", renderSyncedProducts);
+chooseSyncedProductButton?.addEventListener("click", scrollToProductPicker);
+changeSelectedProductButton?.addEventListener("click", scrollToProductPicker);
+
+basketVideoInput?.addEventListener("change", () => {
+  const file = basketVideoInput.files?.[0];
+  stagedBasketVideo = null;
+  if (!file) {
+    basketVideoFileName.textContent = "เลือกวิดีโอ";
+    basketVideoFileMeta.textContent = "คลิกเพื่อเลือกไฟล์ที่ต้องการโพสต์";
+    updateBasketBundle();
+    return;
+  }
+  basketVideoFileName.textContent = file.name;
+  basketVideoFileMeta.textContent = `${formatFileSize(file.size)} · ${file.type || "วิดีโอ"}`;
+  basketStatus.textContent = "เลือกวิดีโอแล้ว กรุณาใส่ข้อความและเลือกสินค้าที่จะผูก";
+  basketStatus.dataset.state = "ready";
+  updateBasketBundle();
+});
+
+basketCaption?.addEventListener("input", () => {
+  basketCaptionCount.textContent = `${basketCaption.value.length} / 4000`;
+  updateBasketBundle();
+});
+
+startBasketFlowButton?.addEventListener("click", async () => {
+  const file = basketVideoInput.files?.[0];
+  if (!file) {
+    basketStatus.textContent = "กรุณาเลือกวิดีโอก่อนเริ่มปักตะกร้า";
+    basketStatus.dataset.state = "error";
+    basketVideoInput.click();
+    return;
+  }
+
+  const caption = basketCaption.value.trim();
+  if (!caption) {
+    basketStatus.textContent = "กรุณาใส่ข้อความหรือแฮชแท็กก่อนเริ่ม";
+    basketStatus.dataset.state = "error";
+    basketCaption.focus();
+    return;
+  }
+
+  if (!selectedBasketProduct) {
+    basketStatus.textContent = "กรุณาเลือกสินค้าจาก TikTok Sync เพื่อผูก Product ID";
+    basketStatus.dataset.state = "error";
+    scrollToProductPicker();
+    return;
+  }
+
+  basketFlowRunning = true;
+  updateBasketBundle();
+  basketStatus.textContent = "กำลังเปิด TikTok Studio…";
+  basketStatus.dataset.state = "working";
+  try {
+    await chrome.storage.session.set({
+      tiktokBasketDraft: {
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type,
+        caption,
+        product: {
+          id: selectedBasketProduct.id,
+          name: selectedBasketProduct.name,
+          imgUrl: selectedBasketProduct.imgUrl,
+        },
+        updatedAt: Date.now(),
+      },
+    });
+    basketStatus.textContent = "กำลังเตรียมไฟล์วิดีโอชั่วคราว…";
+    const stagedVideo = await stageBasketVideo(file);
+    basketStatus.textContent = "กำลังเปิด TikTok Studio และส่งวิดีโอ…";
+    const response = await chrome.runtime.sendMessage({
+      type: "uploadVideoToTikTokStudio",
+      localPath: stagedVideo.localPath,
+      downloadId: stagedVideo.downloadId,
+      originalName: stagedVideo.originalName,
+      caption,
+      productId: selectedBasketProduct.id,
+      productName: selectedBasketProduct.name,
+    });
+    if (!response?.ok) {
+      if (response?.uploaded) {
+        basketStatus.textContent =
+          `วิดีโออัปโหลดแล้ว แต่ใส่ข้อความ/แฮชแท็กไม่สำเร็จ: ${response.error}`;
+        basketStatus.dataset.state = "error";
+        return;
+      }
+      throw new Error(response?.error || "เปิด TikTok Studio ไม่สำเร็จ");
+    }
+    basketStatus.textContent =
+      `อัปโหลดวิดีโอและใส่ข้อความเรียบร้อยแล้ว · ชุดงาน Product ID ${selectedBasketProduct.id}`;
+    basketStatus.dataset.state = "success";
+  } catch (error) {
+    console.error("Could not start TikTok basket flow:", error);
+    basketStatus.textContent = `เปิด TikTok Studio ไม่สำเร็จ: ${String(error)}`;
+    basketStatus.dataset.state = "error";
+  } finally {
+    basketFlowRunning = false;
+    updateBasketBundle();
+  }
+});
+
+updateSelectedProductCard();
 
 function setStatus(message, { progress = null, state = "working" } = {}) {
   status.textContent = message;
@@ -368,7 +758,7 @@ let globalItemCount = 0; // ตัวนับลำดับสินค้า�
 syncTiktokBtn.addEventListener("click", async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-  if (!tab.url.includes("tiktok.com")) {
+  if (!tab?.url?.includes("tiktok.com")) {
     alert("กรุณาเปิดหน้าเว็บ TikTok Studio (หน้าเลือกสินค้า) ก่อนใช้งาน");
     return;
   }
@@ -385,12 +775,11 @@ syncTiktokBtn.addEventListener("click", async () => {
   clearSyncBtn.style.opacity = "0.5";
   clearSyncBtn.style.cursor = "not-allowed";
 
-  tiktokSyncStatus.style.display = "block";
+  tiktokSyncStatus.hidden = false;
   tiktokSyncStatus.textContent = `กำลังเริ่มดึงข้อมูล (ตั้งเป้า ${maxPagesValue} หน้า)...`;
-  tiktokSyncStatus.style.color = "#60a5fa";
+  tiktokSyncStatus.dataset.state = "working";
 
-  tiktokIdOutput.innerHTML = "";
-  tiktokIdOutput.style.display = "flex";
+  resetSyncedProducts();
   globalItemCount = 0;
 
   chrome.tabs.sendMessage(tab.id, { type: "START_PAGINATION_SCRAPE", maxPages: maxPagesValue }, (response) => {
@@ -404,16 +793,16 @@ syncTiktokBtn.addEventListener("click", async () => {
 
     if (chrome.runtime.lastError) {
       tiktokSyncStatus.textContent = "พบข้อผิดพลาด กรุณารีเฟรชหน้า TikTok แล้วลองใหม่";
-      tiktokSyncStatus.style.color = "#f87171";
+      tiktokSyncStatus.dataset.state = "error";
       return;
     }
 
     if (response && response.status === "done") {
       tiktokSyncStatus.textContent = `ดึงข้อมูลเสร็จสมบูรณ์! ได้ทั้งหมด ${globalItemCount} รายการ`;
-      tiktokSyncStatus.style.color = "#4ade80";
+      tiktokSyncStatus.dataset.state = "success";
     } else if (response && response.status === "cancelled") {
       tiktokSyncStatus.textContent = `ยกเลิกแล้ว! ได้มาทั้งหมด ${globalItemCount} รายการ`;
-      tiktokSyncStatus.style.color = "#fbbf24";
+      tiktokSyncStatus.dataset.state = "warning";
     }
   });
 });
@@ -443,9 +832,8 @@ cancelSyncBtn.addEventListener("click", async () => {
 });
 
 clearSyncBtn.addEventListener("click", () => {
-  tiktokIdOutput.innerHTML = "";
-  tiktokIdOutput.style.display = "none";
-  tiktokSyncStatus.style.display = "none";
+  resetSyncedProducts();
+  tiktokSyncStatus.hidden = true;
   tiktokSyncStatus.textContent = "";
   globalItemCount = 0;
 });
@@ -453,69 +841,20 @@ clearSyncBtn.addEventListener("click", () => {
 // ฟังก์ชันนี้มีแค่ตัวเดียวแล้ว! จะไม่ทำให้ข้อมูลเบิ้ลซ้ำอีก
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "TIKTOK_SCRAPE_CHUNK") {
-    const products = message.data;
+    const products = Array.isArray(message.data) ? message.data : [];
 
+    tiktokSyncStatus.hidden = false;
+    tiktokSyncStatus.dataset.state = "working";
     tiktokSyncStatus.textContent = `กำลังกวาดหน้า ${message.page}... ได้มาแล้ว ${message.total} รายการ`;
 
     products.forEach((product) => {
-      globalItemCount++;
-
-      const item = document.createElement("div");
-      item.style.display = "flex";
-      item.style.alignItems = "center";
-      item.style.gap = "12px";
-      item.style.padding = "10px";
-      item.style.background = "var(--bg-surface-elevated, #27272a)";
-      item.style.borderRadius = "8px";
-      item.style.border = "1px solid var(--border-subtle, #3f3f46)";
-
-      const num = document.createElement("div");
-      num.textContent = `${globalItemCount}.`;
-      num.style.color = "#a1a1aa";
-      num.style.fontSize = "14px";
-      num.style.fontWeight = "bold";
-      num.style.minWidth = "28px";
-      num.style.textAlign = "right";
-
-      const img = document.createElement("img");
-      img.src = product.imgUrl || "";
-      img.style.width = "48px";
-      img.style.height = "48px";
-      img.style.objectFit = "cover";
-      img.style.borderRadius = "6px";
-      img.style.backgroundColor = "#3f3f46";
-
-      const details = document.createElement("div");
-      details.style.flex = "1";
-      details.style.minWidth = "0";
-
-      const name = document.createElement("div");
-      let cleanName = product.name.replace(product.id, '').trim();
-      name.textContent = cleanName;
-      name.title = cleanName;
-      name.style.fontSize = "13px";
-      name.style.color = "#e4e4e7";
-      name.style.fontWeight = "500";
-      name.style.whiteSpace = "nowrap";
-      name.style.overflow = "hidden";
-      name.style.textOverflow = "ellipsis";
-      name.style.marginBottom = "4px";
-
-      const id = document.createElement("div");
-      id.textContent = `ID: ${product.id}`;
-      id.style.fontSize = "11px";
-      id.style.color = "#60a5fa";
-
-      details.appendChild(name);
-      details.appendChild(id);
-
-      item.appendChild(num);
-      item.appendChild(img);
-      item.appendChild(details);
-
-      tiktokIdOutput.appendChild(item);
+      const normalized = normalizeSyncedProduct(product);
+      if (!normalized || syncedProducts.some((item) => item.id === normalized.id)) return;
+      syncedProducts.push(normalized);
     });
 
+    globalItemCount = syncedProducts.length;
+    renderSyncedProducts();
     tiktokIdOutput.scrollTop = tiktokIdOutput.scrollHeight;
   }
 });
