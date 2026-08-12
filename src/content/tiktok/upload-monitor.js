@@ -1013,6 +1013,85 @@
       .sort((left, right) => right.score - left.score)[0]?.element || null;
   }
 
+  function pageShowsPublishFailure() {
+    const text = normalize(document.body?.innerText);
+    return /โพสต์ไม่สำเร็จ|ตั้งเวลาไม่สำเร็จ|ไม่สามารถโพสต์|ไม่สามารถตั้งเวลา|post failed|failed to post|could(?: not|n't) post|schedule failed|failed to schedule/i.test(
+      text,
+    );
+  }
+
+  function pageShowsPublishSuccess(publishMode) {
+    const text = normalize(document.body?.innerText);
+    const successPattern = publishMode === "schedule"
+      ? /ตั้งเวลา(?:โพสต์)?สำเร็จ|กำหนดเวลาแล้ว|วิดีโอ(?:ของคุณ)?ได้รับการตั้งเวลาแล้ว|scheduled successfully|successfully scheduled|video (?:has been|is) scheduled/i
+      : /โพสต์สำเร็จ|โพสต์แล้ว|ส่งโพสต์แล้ว|video (?:has been )?posted|posted successfully|post submitted|successfully posted/i;
+    return successPattern.test(text);
+  }
+
+  function pageShowsFreshUploadLanding() {
+    const text = normalize(document.body?.innerText);
+    return /เลือกวิดีโอที่จะอัปโหลด|เลือกวิดีโอ|select video(?:s)? to upload|choose video(?:s)?|upload video/i.test(
+      text,
+    ) && !pageHasVideoEditor();
+  }
+
+  async function waitForPublishResult(publishMode, timeoutMs = 2 * 60 * 1000) {
+    const startedAt = Date.now();
+    const initialUrl = location.href;
+    let stableSuccessChecks = 0;
+    while (Date.now() - startedAt < timeoutMs) {
+      if (pageShowsPublishFailure()) {
+        throw new Error("TikTok แจ้งว่าโพสต์หรือตั้งเวลาวิดีโอไม่สำเร็จ");
+      }
+
+      const navigatedAway = location.href !== initialUrl &&
+        !/\/tiktokstudio\/upload/i.test(location.pathname);
+      const success = pageShowsPublishSuccess(publishMode) ||
+        navigatedAway ||
+        pageShowsFreshUploadLanding();
+      if (success) {
+        stableSuccessChecks += 1;
+        if (stableSuccessChecks >= 2) {
+          return {
+            ok: true,
+            ready: true,
+            url: location.href,
+            evidence: pageShowsPublishSuccess(publishMode)
+              ? "success-message"
+              : navigatedAway
+                ? "navigation"
+                : "fresh-upload-page",
+          };
+        }
+      } else {
+        stableSuccessChecks = 0;
+      }
+      await delay(700);
+    }
+    throw new Error(
+      publishMode === "schedule"
+        ? "หมดเวลารอ TikTok ยืนยันว่าตั้งเวลาโพสต์สำเร็จ"
+        : "หมดเวลารอ TikTok ยืนยันว่าโพสต์สำเร็จ",
+    );
+  }
+
+  function readPublishResult(publishMode) {
+    if (pageShowsPublishFailure()) {
+      return {
+        ok: false,
+        failed: true,
+        error: "TikTok แจ้งว่าโพสต์หรือตั้งเวลาวิดีโอไม่สำเร็จ",
+      };
+    }
+    if (pageShowsPublishSuccess(publishMode)) {
+      return { ok: true, ready: true, evidence: "success-message" };
+    }
+    if (pageShowsFreshUploadLanding()) {
+      return { ok: true, ready: true, evidence: "fresh-upload-page" };
+    }
+    return { ok: true, ready: false };
+  }
+
   function findScheduleInput(kind) {
     const candidates = [...document.querySelectorAll(
       'input:not([type="hidden"]):not([type="radio"]), [role="combobox"] input',
@@ -1479,6 +1558,23 @@
         .then(sendResponse)
         .catch((error) => sendResponse({ ok: false, error: String(error) }));
       return true;
+    }
+
+    if (message?.type === "WAIT_FOR_TIKTOK_PUBLISH_RESULT") {
+      void waitForPublishResult(
+        message.publishMode === "schedule" ? "schedule" : "now",
+        Number(message.timeoutMs) || 2 * 60 * 1000,
+      )
+        .then(sendResponse)
+        .catch((error) => sendResponse({ ok: false, error: String(error) }));
+      return true;
+    }
+
+    if (message?.type === "CHECK_TIKTOK_PUBLISH_RESULT") {
+      sendResponse(readPublishResult(
+        message.publishMode === "schedule" ? "schedule" : "now",
+      ));
+      return false;
     }
 
     if (message?.type === "PREPARE_TIKTOK_SCHEDULE_FIELDS") {

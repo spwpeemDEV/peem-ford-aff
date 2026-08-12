@@ -56,21 +56,77 @@ async function getPendingProject(tabId) {
   return pendingProjects[tabId] ?? null;
 }
 
-async function openOrFocusTikTokUploadPage({ forceFresh = false } = {}) {
+async function navigateTikTokTabHandlingLeaveDialog(tabId, url) {
+  const debuggee = { tabId };
+  let attached = false;
+  const onDebuggerEvent = (source, method) => {
+    if (source.tabId !== tabId || method !== "Page.javascriptDialogOpening") return;
+    void chrome.debugger.sendCommand(debuggee, "Page.handleJavaScriptDialog", {
+      accept: true,
+    }).catch(() => {});
+  };
+
+  try {
+    await chrome.debugger.attach(debuggee, "1.3");
+    attached = true;
+    chrome.debugger.onEvent.addListener(onDebuggerEvent);
+    await chrome.debugger.sendCommand(debuggee, "Page.enable");
+    await chrome.debugger.sendCommand(debuggee, "Page.navigate", { url });
+    // Keep the debugger attached briefly so a delayed beforeunload dialog can
+    // be accepted before the next clip waits for page completion.
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+  } finally {
+    chrome.debugger.onEvent.removeListener(onDebuggerEvent);
+    if (attached) {
+      await chrome.debugger.detach(debuggee).catch(() => {});
+    }
+  }
+  return chrome.tabs.get(tabId);
+}
+
+async function getReusableTikTokTab(preferredTabId) {
+  const requestedTabId = Number(preferredTabId);
+  if (Number.isInteger(requestedTabId)) {
+    try {
+      const preferredTab = await chrome.tabs.get(requestedTabId);
+      if (/^https:\/\/www\.tiktok\.com\/tiktokstudio(?:\/|$)/i.test(
+        String(preferredTab.url || ""),
+      )) {
+        return preferredTab;
+      }
+    } catch {
+      // The remembered tab was closed. Fall back to another TikTok Studio tab
+      // and create a new one only when none remains.
+    }
+  }
+
   const uploadTabs = await chrome.tabs.query({
-    url: ["https://www.tiktok.com/tiktokstudio/upload*"],
+    url: [
+      "https://www.tiktok.com/tiktokstudio/upload*",
+      "https://www.tiktok.com/tiktokstudio/*",
+    ],
   });
-  const existingTab = uploadTabs
+  return uploadTabs
     .filter((tab) => Number.isInteger(tab.id))
     .sort((left, right) => (right.lastAccessed || 0) - (left.lastAccessed || 0))[0];
+}
+
+async function openOrFocusTikTokUploadPage({
+  forceFresh = false,
+  preferredTabId = null,
+} = {}) {
+  const existingTab = await getReusableTikTokTab(preferredTabId);
 
   if (existingTab) {
     if (Number.isInteger(existingTab.windowId)) {
       await chrome.windows.update(existingTab.windowId, { focused: true });
     }
-    const tab = await chrome.tabs.update(existingTab.id, forceFresh
-      ? { active: true, url: `${TIKTOK_UPLOAD_URL}&flow_queue=${Date.now()}` }
-      : { active: true });
+    const tab = forceFresh
+      ? await navigateTikTokTabHandlingLeaveDialog(
+        existingTab.id,
+        `${TIKTOK_UPLOAD_URL}&flow_queue=${Date.now()}`,
+      )
+      : await chrome.tabs.update(existingTab.id, { active: true });
     return {
       tab,
       reused: true,
@@ -236,7 +292,52 @@ function findMarkedDescriptionNode(root) {
   }) || null;
 }
 
-async function setTikTokDescription(tabId, description, expectedFilename = "") {
+async function dispatchSelectAll(debuggee) {
+  await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", {
+    type: "rawKeyDown",
+    key: "a",
+    code: "KeyA",
+    modifiers: 2,
+    windowsVirtualKeyCode: 65,
+    nativeVirtualKeyCode: 65,
+  });
+  await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", {
+    type: "keyUp",
+    key: "a",
+    code: "KeyA",
+    modifiers: 2,
+    windowsVirtualKeyCode: 65,
+    nativeVirtualKeyCode: 65,
+  });
+}
+
+async function readTikTokDescription(tabId, expectedFilename = "") {
+  return chrome.tabs.sendMessage(tabId, {
+    type: "READ_TIKTOK_DESCRIPTION",
+    expectedFilename,
+  });
+}
+
+async function descriptionRemainsExact(tabId, text, expectedFilename = "") {
+  // TikTok may reconcile its controlled editor shortly after an input event.
+  // Require repeated exact reads so a temporarily correct DOM value is not
+  // accepted while the old generated filename is still in React state.
+  for (let check = 0; check < 3; check += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const current = await readTikTokDescription(tabId, expectedFilename);
+    if (!current?.ok || !descriptionMatches(current.text, text)) {
+      return { ok: false, text: current?.text || "" };
+    }
+  }
+  return { ok: true, text };
+}
+
+async function setTikTokDescription(
+  tabId,
+  description,
+  expectedFilename = "",
+  attempt = 0,
+) {
   const text = String(description || "").trim();
   if (!text) {
     return false;
@@ -298,8 +399,10 @@ async function setTikTokDescription(tabId, description, expectedFilename = "") {
       },
     );
     if (selectionResult?.result?.value !== true) {
-      throw new Error("เลือกชื่อวิดีโอเดิมในช่องคำอธิบายไม่สำเร็จ");
+      // The native shortcut below is more reliable for React/contenteditable
+      // editors. Keep going even when the DOM Range cannot report selection.
     }
+    await dispatchSelectAll(debuggee);
     await new Promise((resolve) => setTimeout(resolve, 350));
     await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", {
       type: "rawKeyDown",
@@ -350,6 +453,28 @@ async function setTikTokDescription(tabId, description, expectedFilename = "") {
       throw new Error("ลบชื่อวิดีโอเดิมในช่องคำอธิบายไม่สำเร็จ");
     }
     await new Promise((resolve) => setTimeout(resolve, TIKTOK_FIELD_SETTLE_MS));
+    await chrome.debugger.sendCommand(debuggee, "DOM.focus", {
+      backendNodeId: editorNode.backendNodeId,
+    });
+    // Select/delete once more immediately before insertion. This prevents a
+    // late TikTok reconciliation from restoring the filename between clear
+    // and insert, which otherwise produces "filename#hashtag".
+    await dispatchSelectAll(debuggee);
+    await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", {
+      type: "rawKeyDown",
+      key: "Backspace",
+      code: "Backspace",
+      windowsVirtualKeyCode: 8,
+      nativeVirtualKeyCode: 8,
+    });
+    await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", {
+      type: "keyUp",
+      key: "Backspace",
+      code: "Backspace",
+      windowsVirtualKeyCode: 8,
+      nativeVirtualKeyCode: 8,
+    });
+    await new Promise((resolve) => setTimeout(resolve, TIKTOK_FIELD_SETTLE_MS));
     await chrome.debugger.sendCommand(debuggee, "Input.insertText", { text });
   } finally {
     await chrome.debugger.detach(debuggee).catch(() => { });
@@ -357,26 +482,29 @@ async function setTikTokDescription(tabId, description, expectedFilename = "") {
 
   // Wait for TikTok to commit the controlled-editor value before reading it.
   await new Promise((resolve) => setTimeout(resolve, TIKTOK_STAGE_SETTLE_MS));
-  const verified = await chrome.tabs.sendMessage(tabId, {
-    type: "READ_TIKTOK_DESCRIPTION",
-  });
-  if (!verified?.ok || !descriptionMatches(verified.text, text)) {
+  const verified = await descriptionRemainsExact(tabId, text, expectedFilename);
+  if (!verified.ok && attempt < 1) {
+    await new Promise((resolve) => setTimeout(resolve, TIKTOK_STAGE_SETTLE_MS));
+    return setTikTokDescription(tabId, text, expectedFilename, attempt + 1);
+  }
+  if (!verified.ok) {
     const fallback = await chrome.tabs.sendMessage(tabId, {
       type: "APPLY_TIKTOK_DESCRIPTION_FALLBACK",
       text,
       expectedFilename,
     });
     await new Promise((resolve) => setTimeout(resolve, TIKTOK_STAGE_SETTLE_MS));
-    const fallbackVerified = await chrome.tabs.sendMessage(tabId, {
-      type: "READ_TIKTOK_DESCRIPTION",
-    });
+    const fallbackVerified = await descriptionRemainsExact(
+      tabId,
+      text,
+      expectedFilename,
+    );
     if (
       !fallback?.ok ||
-      !fallbackVerified?.ok ||
-      !descriptionMatches(fallbackVerified.text, text)
+      !fallbackVerified.ok
     ) {
       throw new Error(
-        `วางข้อความและแฮชแท็กในช่องคำอธิบายไม่สำเร็จ (ค่าปัจจุบัน: ${fallbackVerified?.text || "ว่าง"})`,
+        `วางข้อความและแฮชแท็กในช่องคำอธิบายไม่สำเร็จ (ค่าปัจจุบัน: ${fallbackVerified.text || "ว่าง"})`,
       );
     }
   }
@@ -766,6 +894,59 @@ async function enableTikTokAiGeneratedContent(tabId) {
   throw new Error('เปิดสวิตช์ "เนื้อหาที่สร้างโดย AI" ไม่สำเร็จ');
 }
 
+async function waitForTikTokPublishConfirmation(
+  tabId,
+  publishMode,
+  timeoutMs = 2 * 60 * 1000,
+) {
+  const startedAt = Date.now();
+  const initialTab = await chrome.tabs.get(tabId);
+  const initialUrl = String(initialTab.url || "");
+  let stableChecks = 0;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const currentTab = await chrome.tabs.get(tabId);
+    const currentUrl = String(currentTab.url || "");
+    if (
+      currentUrl &&
+      currentUrl !== initialUrl &&
+      !/\/tiktokstudio\/upload/i.test(currentUrl)
+    ) {
+      return { ok: true, ready: true, evidence: "navigation" };
+    }
+
+    let status = null;
+    try {
+      if (currentTab.status === "complete") {
+        await ensureTikTokUploadMonitor(tabId);
+      }
+      status = await chrome.tabs.sendMessage(tabId, {
+        type: "CHECK_TIKTOK_PUBLISH_RESULT",
+        publishMode,
+      });
+    } catch {
+      // A successful post can replace the document while we are polling.
+      // Re-read the tab on the next pass instead of treating that as failure.
+    }
+
+    if (status?.failed) {
+      throw new Error(status.error || "TikTok แจ้งว่าโพสต์ไม่สำเร็จ");
+    }
+    if (status?.ready) {
+      stableChecks += 1;
+      if (stableChecks >= 2) return status;
+    } else {
+      stableChecks = 0;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 700));
+  }
+  throw new Error(
+    publishMode === "schedule"
+      ? "หมดเวลารอ TikTok ยืนยันว่าตั้งเวลาโพสต์สำเร็จ"
+      : "หมดเวลารอ TikTok ยืนยันว่าโพสต์สำเร็จ",
+  );
+}
+
 async function waitForTikTokValidationAndPublish(tabId, publishMode) {
   let validation = await chrome.tabs.sendMessage(tabId, {
     type: "WAIT_FOR_TIKTOK_VALIDATION",
@@ -810,8 +991,20 @@ async function waitForTikTokValidationAndPublish(tabId, publishMode) {
     30 * 1000,
     { publishMode: publishMode === "schedule" ? "schedule" : "now" },
   );
+  const publishConfirmation = await waitForTikTokPublishConfirmation(
+    tabId,
+    publishMode === "schedule" ? "schedule" : "now",
+  );
+  if (!publishConfirmation?.ok || !publishConfirmation.ready) {
+    throw new Error(
+      publishConfirmation?.error ||
+      "TikTok ยังไม่ยืนยันผลการโพสต์ กรุณาตรวจสอบหน้า TikTok Studio",
+    );
+  }
   return {
     ok: true,
+    publishConfirmed: true,
+    publishEvidence: String(publishConfirmation.evidence || ""),
     validationSkipped: Boolean(validation.validationSkipped),
     warning: String(validation.warning || ""),
   };
@@ -874,6 +1067,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const forceFreshUpload = Boolean(message.forceFreshUpload);
         const { tab, reused } = await openOrFocusTikTokUploadPage({
           forceFresh: forceFreshUpload,
+          preferredTabId: message.tiktokTabId,
         });
         tabId = tab.id;
         await waitForTabComplete(tab.id);
@@ -984,7 +1178,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           productSearchStarted,
           postTimingConfigured: productSearchStarted,
           aiContentLabeled: productSearchStarted,
-          published: productSearchStarted,
+          published: Boolean(productSearchStarted && publishResult?.publishConfirmed),
           validationSkipped: Boolean(publishResult?.validationSkipped),
           warning: String(publishResult?.warning || ""),
           productId: String(message.productId || "").trim(),
@@ -1001,6 +1195,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           ok: false,
           uploaded: videoUploaded,
           stage,
+          tabId,
           error: String(error),
         });
       }

@@ -512,7 +512,14 @@ function basketFlowErrorMessage(response) {
   return response?.error || "ดำเนินการใน TikTok Studio ไม่สำเร็จ";
 }
 
-async function runBasketQueueItem(item, scheduledAt, queueIndex, queueTotal, queueStartedAt) {
+async function runBasketQueueItem(
+  item,
+  scheduledAt,
+  queueIndex,
+  queueTotal,
+  queueStartedAt,
+  tiktokTabId,
+) {
   const stagedVideo = await stageBasketVideo(item.file);
   const response = await chrome.runtime.sendMessage({
     type: "uploadVideoToTikTokStudio",
@@ -528,6 +535,7 @@ async function runBasketQueueItem(item, scheduledAt, queueIndex, queueTotal, que
     queueIndex,
     queueTotal,
     queueStartedAt,
+    tiktokTabId,
   });
   if (!response?.ok) throw new Error(basketFlowErrorMessage(response));
   return response;
@@ -545,6 +553,7 @@ startBasketQueueButton?.addEventListener("click", async () => {
   const baseTimestamp = getScheduleTimestamp();
   const intervalMs = getBasketIntervalMinutes() * 60 * 1000;
   const queueStartedAt = Date.now();
+  let queueTikTokTabId = null;
   basketFlowRunning = true;
   updateBasketBundle();
   try {
@@ -565,7 +574,11 @@ startBasketQueueButton?.addEventListener("click", async () => {
           index + 1,
           basketQueue.length,
           queueStartedAt,
+          queueTikTokTabId,
         );
+        queueTikTokTabId = Number.isInteger(response.tabId)
+          ? response.tabId
+          : queueTikTokTabId;
         item.state = "success";
         item.stateText = response.validationSkipped
           ? `สำเร็จ · ${response.warning || "ข้ามการตรวจ Lite"}`
