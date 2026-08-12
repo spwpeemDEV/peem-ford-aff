@@ -1,6 +1,6 @@
 :root {
   color-scheme: dark;
-  font-family: "Noto Sans Thai", "Segoe UI", Tahoma, sans-serif;
+  font-family: "Leelawadee UI", "Noto Sans Thai", Tahoma, "Segoe UI", sans-serif;
   --bg: #0b0c10;
   --surface: #121318;
   --surface-raised: #18191f;
@@ -31,6 +31,10 @@ body {
     radial-gradient(circle at 92% 4%, rgba(75, 83, 255, 0.14), transparent 27%),
     radial-gradient(circle at -10% 38%, rgba(112, 59, 255, 0.1), transparent 30%),
     var(--bg);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 button,
@@ -111,7 +115,8 @@ select {
 
 .product-search-field[hidden],
 .synced-product-list[hidden],
-.selected-product-card[hidden] {
+.selected-product-card[hidden],
+.basket-schedule-field[hidden] {
   display: none !important;
 }
 
@@ -398,6 +403,240 @@ select {
 .basket-product-step {
   display: grid;
   gap: 9px;
+}
+
+.basket-post-time-step {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.basket-post-time-step legend {
+  width: 100%;
+  margin-bottom: 0;
+  padding: 0;
+}
+
+.post-time-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.post-time-option {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 76px;
+  padding: 10px;
+  grid-template-columns: 27px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  color: #747886;
+  background: #0e0f13;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.post-time-option:hover {
+  border-color: rgba(119, 128, 255, 0.44);
+}
+
+.post-time-option.is-selected {
+  border-color: rgba(122, 131, 255, 0.52);
+  background: rgba(89, 101, 255, 0.09);
+  box-shadow: inset 0 0 0 1px rgba(122, 131, 255, 0.08);
+}
+
+.post-time-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.post-time-option > span:nth-of-type(1) {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  border-radius: 8px;
+  color: #959cff;
+  background: rgba(89, 101, 255, 0.1);
+  font-size: 13px;
+}
+
+.post-time-option > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.post-time-option strong {
+  color: #dfe1e7;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.post-time-option small {
+  color: #707481;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.basket-schedule-field {
+  display: grid;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid rgba(122, 131, 255, 0.2);
+  border-radius: 13px;
+  background: rgba(75, 84, 255, 0.045);
+}
+
+.basket-schedule-field > span {
+  display: grid;
+  gap: 2px;
+}
+
+.basket-schedule-field strong {
+  color: #e1e3e9;
+  font-size: 10px;
+}
+
+.basket-schedule-field small {
+  color: #777b87;
+  font-size: 8.5px;
+}
+
+.basket-schedule-field input {
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  outline: none;
+  color: var(--text);
+  color-scheme: dark;
+  background: #0d0e12;
+  font: inherit;
+  font-size: 10px;
+}
+
+.basket-schedule-field input:focus {
+  border-color: rgba(119, 128, 255, 0.72);
+  box-shadow: 0 0 0 3px rgba(82, 91, 255, 0.1);
+}
+
+.basket-schedule-field {
+  display: grid;
+  gap: 12px;
+}
+
+.basket-schedule-field > label {
+  display: grid;
+  gap: 8px;
+}
+
+.queue-interval-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.queue-interval-input small {
+  color: var(--muted, #9ca3af);
+}
+
+.basket-queue-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(129, 140, 248, 0.24);
+  border-radius: 16px;
+  background: rgba(49, 46, 129, 0.1);
+}
+
+.basket-queue-heading,
+.basket-queue-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.basket-queue-heading > span:first-child,
+.basket-queue-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.basket-queue-heading small,
+.basket-queue-card > p,
+.basket-queue-copy small {
+  color: var(--muted, #9ca3af);
+}
+
+.queue-add-button {
+  min-height: 44px;
+  border: 1px dashed rgba(129, 140, 248, 0.55);
+  border-radius: 12px;
+  background: rgba(79, 70, 229, 0.12);
+  color: inherit;
+  cursor: pointer;
+}
+
+.queue-add-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.basket-queue-list {
+  display: grid;
+  gap: 8px;
+}
+
+.basket-queue-item {
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.22);
+}
+
+.basket-queue-item[data-state="working"] {
+  border-color: #60a5fa;
+}
+
+.basket-queue-item[data-state="success"] {
+  border-color: #34d399;
+}
+
+.basket-queue-item[data-state="error"] {
+  border-color: #fb7185;
+}
+
+.basket-queue-copy strong,
+.basket-queue-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.basket-queue-remove {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(244, 63, 94, 0.12);
+  color: #fb7185;
+  cursor: pointer;
 }
 
 .choose-product-button,
@@ -1406,6 +1645,199 @@ button[hidden] {
   color: #ffadb4;
   background: rgba(115, 30, 39, 0.18);
   font-size: 11px;
+}
+
+/* Readable sidebar typography — especially for Thai text on Windows. */
+.panel-tab,
+.page-back-button,
+.cancel-button {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.brand-name,
+.version-pill {
+  font-size: 12px;
+}
+
+.section-kicker,
+.primary-button small {
+  font-size: 9.5px;
+  line-height: 1.4;
+}
+
+.card-heading h2 {
+  font-size: 19px;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.basket-hero-card h1 {
+  font-size: 29px;
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+
+.basket-hero-card > p:last-child,
+.product-sync-hint,
+.basket-placeholder p {
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.field strong,
+.compact-field strong,
+.file-copy strong {
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.field small,
+.compact-field small,
+.file-copy small {
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.step-number {
+  width: 28px;
+  height: 28px;
+  font-size: 10px;
+}
+
+textarea {
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.input-tag,
+.synced-product-indicator {
+  font-size: 10px;
+}
+
+.tiktok-sync-status,
+.product-search-field input,
+.basket-status {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.product-result-count,
+.bundle-progress {
+  font-size: 10.5px;
+}
+
+.synced-product-copy strong,
+.selected-product-copy strong {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.synced-product-copy small,
+.selected-product-copy small {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.choose-product-button strong,
+.post-time-option strong {
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.choose-product-button small,
+.post-time-option small {
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+
+.basket-schedule-field strong {
+  font-size: 12.5px;
+}
+
+.basket-schedule-field small {
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.basket-schedule-field input {
+  font-size: 13px;
+}
+
+.bundle-summary-heading small {
+  font-size: 9px;
+}
+
+.bundle-summary-heading strong {
+  font-size: 13px;
+}
+
+.bundle-summary-row strong {
+  font-size: 11.5px;
+}
+
+.bundle-summary-row small {
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.primary-button > span:first-child {
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+h1 {
+  line-height: 1.25;
+  letter-spacing: -0.4px;
+}
+
+.description {
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.product-list-heading small,
+.job-summary,
+.job-summary strong {
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.count-pill,
+.product-table-head,
+.product-index,
+.product-status,
+.toggle-product,
+.remove-product {
+  font-size: 10px;
+}
+
+.add-product-button {
+  font-size: 12px;
+}
+
+.product-name strong {
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.product-name small {
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+select {
+  font-size: 12px;
+}
+
+.status-heading {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.status {
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 @media (min-width: 420px) {

@@ -43,7 +43,16 @@ const basketBundleProgress = document.querySelector("#basketBundleProgress");
 const bundleVideoValue = document.querySelector("#bundleVideoValue");
 const bundleCaptionValue = document.querySelector("#bundleCaptionValue");
 const bundleProductValue = document.querySelector("#bundleProductValue");
+const bundleTimingValue = document.querySelector("#bundleTimingValue");
+const basketPublishModeInputs = [...document.querySelectorAll('input[name="basketPublishMode"]')];
+const basketScheduleField = document.querySelector("#basketScheduleField");
+const basketScheduleAt = document.querySelector("#basketScheduleAt");
+const basketIntervalMinutes = document.querySelector("#basketIntervalMinutes");
 const basketBundleRows = [...document.querySelectorAll("[data-bundle-item]")];
+const addBasketQueueItemButton = document.querySelector("#addBasketQueueItem");
+const startBasketQueueButton = document.querySelector("#startBasketQueue");
+const basketQueueList = document.querySelector("#basketQueueList");
+const basketQueueCount = document.querySelector("#basketQueueCount");
 
 let activeTabId = null;
 let nextProductId = 1;
@@ -53,6 +62,8 @@ let stagedBasketVideo = null;
 let syncedProducts = [];
 let selectedBasketProduct = null;
 let basketFlowRunning = false;
+let basketQueue = [];
+let nextBasketQueueId = 1;
 
 versionLabel.textContent = `v${chrome.runtime.getManifest().version}`;
 
@@ -188,6 +199,95 @@ function countHashtags(value) {
   return (String(value || "").match(/(^|\s)#[^\s#]+/g) || []).length;
 }
 
+function getBasketPublishMode() {
+  return basketPublishModeInputs.find((input) => input.checked)?.value || "now";
+}
+
+function toLocalDateTimeInputValue(date) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function getScheduleTimestamp() {
+  if (getBasketPublishMode() !== "schedule" || !basketScheduleAt?.value) return NaN;
+  return new Date(basketScheduleAt.value).getTime();
+}
+
+function scheduleIsValid() {
+  if (getBasketPublishMode() === "now") return true;
+  const minuteMatch = basketScheduleAt?.value.match(/T\d{2}:(\d{2})/);
+  const minute = Number(minuteMatch?.[1]);
+  return getScheduleTimestamp() > Date.now() && Number.isInteger(minute) && minute % 5 === 0;
+}
+
+function getBasketIntervalMinutes() {
+  return Number(basketIntervalMinutes?.value);
+}
+
+function basketIntervalIsValid() {
+  if (getBasketPublishMode() !== "schedule") return true;
+  const minutes = getBasketIntervalMinutes();
+  return Number.isInteger(minutes) && minutes >= 5 && minutes % 5 === 0;
+}
+
+function updatePostTimeUi({ setDefault = false } = {}) {
+  const mode = getBasketPublishMode();
+  for (const input of basketPublishModeInputs) {
+    input.closest(".post-time-option")?.classList.toggle("is-selected", input.checked);
+  }
+  basketScheduleField.hidden = mode !== "schedule";
+  basketScheduleAt.required = mode === "schedule";
+  if (mode === "schedule" && setDefault && !basketScheduleAt.value) {
+    const defaultTime = new Date(Date.now() + 30 * 60 * 1000);
+    defaultTime.setMinutes(Math.ceil(defaultTime.getMinutes() / 5) * 5, 0, 0);
+    basketScheduleAt.value = toLocalDateTimeInputValue(defaultTime);
+  }
+  updateBasketBundle();
+}
+
+function getQueueScheduleValue(index) {
+  if (getBasketPublishMode() !== "schedule") return "";
+  const timestamp = getScheduleTimestamp() + index * getBasketIntervalMinutes() * 60 * 1000;
+  return toLocalDateTimeInputValue(new Date(timestamp));
+}
+
+function renderBasketQueue() {
+  basketQueueList.replaceChildren();
+  basketQueue.forEach((item, index) => {
+    const row = document.createElement("article");
+    row.className = "basket-queue-item";
+    row.dataset.queueId = String(item.id);
+    row.dataset.state = item.state || "pending";
+    const copy = document.createElement("span");
+    copy.className = "basket-queue-copy";
+    const title = document.createElement("strong");
+    title.textContent = `${index + 1}. ${item.file.name}`;
+    const detail = document.createElement("small");
+    const scheduleText = getBasketPublishMode() === "schedule"
+      ? new Date(getScheduleTimestamp() + index * getBasketIntervalMinutes() * 60 * 1000)
+        .toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })
+      : "โพสต์ทันที";
+    detail.textContent = `${item.product.name} · ${scheduleText}${item.stateText ? ` · ${item.stateText}` : ""}`;
+    copy.append(title, detail);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "basket-queue-remove";
+    remove.textContent = "×";
+    remove.title = "นำออกจากคิว";
+    remove.disabled = basketFlowRunning;
+    remove.addEventListener("click", () => {
+      basketQueue = basketQueue.filter((entry) => entry.id !== item.id);
+      updateBasketBundle();
+    });
+    row.append(copy, remove);
+    basketQueueList.appendChild(row);
+  });
+  basketQueueCount.textContent = `${basketQueue.length} คลิป`;
+  startBasketQueueButton.disabled =
+    basketFlowRunning || !basketQueue.length || !scheduleIsValid() || !basketIntervalIsValid();
+  startBasketQueueButton.dataset.running = String(basketFlowRunning);
+}
+
 function scrollToProductPicker() {
   productSyncCard?.scrollIntoView({ behavior: "smooth", block: "start" });
   window.setTimeout(() => {
@@ -202,7 +302,14 @@ function scrollToProductPicker() {
 function updateBasketBundle() {
   const file = basketVideoInput?.files?.[0] || null;
   const caption = basketCaption?.value.trim() || "";
-  const completed = [Boolean(file), Boolean(caption), Boolean(selectedBasketProduct)];
+  const publishMode = getBasketPublishMode();
+  const timingReady = scheduleIsValid() && basketIntervalIsValid();
+  const completed = [
+    Boolean(file),
+    Boolean(caption),
+    Boolean(selectedBasketProduct),
+    timingReady,
+  ];
 
   bundleVideoValue.textContent = file
     ? `${file.name} · ${formatFileSize(file.size)}`
@@ -213,6 +320,11 @@ function updateBasketBundle() {
   bundleProductValue.textContent = selectedBasketProduct
     ? `${selectedBasketProduct.name} · ID ${selectedBasketProduct.id}`
     : "ยังไม่ได้เลือก Product ID";
+  bundleTimingValue.textContent = publishMode === "now"
+    ? "โพสต์ทันที"
+    : timingReady
+      ? `ตั้งเวลา ${new Date(getScheduleTimestamp()).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })}`
+      : "เลือกเวลาอนาคต โดยนาทีต้องลงท้าย 00, 05, 10…";
 
   basketBundleRows.forEach((row, index) => {
     const complete = completed[index];
@@ -222,10 +334,12 @@ function updateBasketBundle() {
   });
 
   const completeCount = completed.filter(Boolean).length;
-  basketBundleProgress.textContent = `${completeCount} / 3`;
-  basketBundleProgress.classList.toggle("is-complete", completeCount === 3);
-  startBasketFlowButton.disabled = basketFlowRunning || completeCount !== 3;
+  basketBundleProgress.textContent = `${completeCount} / 4`;
+  basketBundleProgress.classList.toggle("is-complete", completeCount === 4);
+  startBasketFlowButton.disabled = basketFlowRunning || completeCount !== 4;
   startBasketFlowButton.dataset.running = String(basketFlowRunning);
+  addBasketQueueItemButton.disabled = basketFlowRunning || completeCount !== 4;
+  renderBasketQueue();
 }
 
 function updateSelectedProductCard() {
@@ -316,6 +430,11 @@ function resetSyncedProducts() {
 syncedProductSearch?.addEventListener("input", renderSyncedProducts);
 chooseSyncedProductButton?.addEventListener("click", scrollToProductPicker);
 changeSelectedProductButton?.addEventListener("click", scrollToProductPicker);
+for (const input of basketPublishModeInputs) {
+  input.addEventListener("change", () => updatePostTimeUi({ setDefault: true }));
+}
+basketScheduleAt?.addEventListener("input", updateBasketBundle);
+basketIntervalMinutes?.addEventListener("input", updateBasketBundle);
 
 basketVideoInput?.addEventListener("change", () => {
   const file = basketVideoInput.files?.[0];
@@ -336,6 +455,139 @@ basketVideoInput?.addEventListener("change", () => {
 basketCaption?.addEventListener("input", () => {
   basketCaptionCount.textContent = `${basketCaption.value.length} / 4000`;
   updateBasketBundle();
+});
+
+addBasketQueueItemButton?.addEventListener("click", () => {
+  const file = basketVideoInput?.files?.[0] || null;
+  const caption = basketCaption?.value.trim() || "";
+  if (!file || !caption || !selectedBasketProduct) {
+    basketStatus.textContent = "กรุณาเตรียมวิดีโอ ข้อความ และสินค้าให้ครบก่อนเพิ่มลงคิว";
+    basketStatus.dataset.state = "error";
+    return;
+  }
+  if (!scheduleIsValid() || !basketIntervalIsValid()) {
+    basketStatus.textContent = "กรุณาตรวจสอบเวลาเริ่มต้นและระยะห่างของแต่ละคลิป";
+    basketStatus.dataset.state = "error";
+    return;
+  }
+
+  basketQueue.push({
+    id: nextBasketQueueId++,
+    file,
+    caption,
+    product: { ...selectedBasketProduct },
+    state: "pending",
+    stateText: "รอดำเนินการ",
+  });
+  stagedBasketVideo = null;
+  basketVideoInput.value = "";
+  basketCaption.value = "";
+  basketCaptionCount.textContent = "0 / 4000";
+  selectedBasketProduct = null;
+  basketVideoFileName.textContent = "เลือกวิดีโอถัดไป";
+  basketVideoFileMeta.textContent = "คลิกเพื่อเพิ่มคลิปใหม่เข้าคิว";
+  updateSelectedProductCard();
+  renderSyncedProducts();
+  basketStatus.textContent = `เพิ่มคลิปที่ ${basketQueue.length} ลงคิวแล้ว`;
+  basketStatus.dataset.state = "success";
+  updateBasketBundle();
+});
+
+function basketFlowErrorMessage(response) {
+  if (response?.stage === "validation") {
+    return `การตรวจสอบหรือการโพสต์ไม่สำเร็จ: ${response.error}`;
+  }
+  if (response?.stage === "ai-label") {
+    return `เปิดป้ายเนื้อหาที่สร้างโดย AI ไม่สำเร็จ: ${response.error}`;
+  }
+  if (response?.stage === "post-time") {
+    return `ตั้งค่าเวลาโพสต์ไม่สำเร็จ: ${response.error}`;
+  }
+  if (response?.stage === "product-link") {
+    return `ผูกสินค้าไม่สำเร็จ: ${response.error}`;
+  }
+  if (response?.stage === "caption") {
+    return `ใส่ข้อความและแฮชแท็กไม่สำเร็จ: ${response.error}`;
+  }
+  return response?.error || "ดำเนินการใน TikTok Studio ไม่สำเร็จ";
+}
+
+async function runBasketQueueItem(item, scheduledAt, queueIndex, queueTotal, queueStartedAt) {
+  const stagedVideo = await stageBasketVideo(item.file);
+  const response = await chrome.runtime.sendMessage({
+    type: "uploadVideoToTikTokStudio",
+    localPath: stagedVideo.localPath,
+    downloadId: stagedVideo.downloadId,
+    originalName: stagedVideo.originalName,
+    caption: item.caption,
+    productId: item.product.id,
+    productName: item.product.name,
+    publishMode: getBasketPublishMode(),
+    scheduledAt,
+    forceFreshUpload: true,
+    queueIndex,
+    queueTotal,
+    queueStartedAt,
+  });
+  if (!response?.ok) throw new Error(basketFlowErrorMessage(response));
+  return response;
+}
+
+startBasketQueueButton?.addEventListener("click", async () => {
+  if (!basketQueue.length || basketFlowRunning) return;
+  if (!scheduleIsValid() || !basketIntervalIsValid()) {
+    basketStatus.textContent = "กรุณาตรวจสอบเวลาเริ่มต้นและระยะห่างของแต่ละคลิป";
+    basketStatus.dataset.state = "error";
+    return;
+  }
+
+  const publishMode = getBasketPublishMode();
+  const baseTimestamp = getScheduleTimestamp();
+  const intervalMs = getBasketIntervalMinutes() * 60 * 1000;
+  const queueStartedAt = Date.now();
+  basketFlowRunning = true;
+  updateBasketBundle();
+  try {
+    for (let index = 0; index < basketQueue.length; index += 1) {
+      const item = basketQueue[index];
+      item.state = "working";
+      item.stateText = `กำลังทำคลิป ${index + 1}/${basketQueue.length}`;
+      renderBasketQueue();
+      basketStatus.textContent = `กำลังโพสต์คลิป ${index + 1}/${basketQueue.length}: ${item.file.name}`;
+      basketStatus.dataset.state = "working";
+      const scheduledAt = publishMode === "schedule"
+        ? toLocalDateTimeInputValue(new Date(baseTimestamp + index * intervalMs))
+        : "";
+      try {
+        const response = await runBasketQueueItem(
+          item,
+          scheduledAt,
+          index + 1,
+          basketQueue.length,
+          queueStartedAt,
+        );
+        item.state = "success";
+        item.stateText = response.validationSkipped
+          ? `สำเร็จ · ${response.warning || "ข้ามการตรวจ Lite"}`
+          : "โพสต์สำเร็จ";
+      } catch (error) {
+        item.state = "error";
+        item.stateText = String(error);
+        renderBasketQueue();
+        throw new Error(`คลิป ${index + 1} (${item.file.name}): ${String(error)}`);
+      }
+      stagedBasketVideo = null;
+      renderBasketQueue();
+    }
+    basketStatus.textContent = `โพสต์ครบ ${basketQueue.length} คลิปเรียบร้อยแล้ว`;
+    basketStatus.dataset.state = "success";
+  } catch (error) {
+    basketStatus.textContent = `คิวหยุดทำงาน: ${String(error)}`;
+    basketStatus.dataset.state = "error";
+  } finally {
+    basketFlowRunning = false;
+    updateBasketBundle();
+  }
 });
 
 startBasketFlowButton?.addEventListener("click", async () => {
@@ -362,6 +614,15 @@ startBasketFlowButton?.addEventListener("click", async () => {
     return;
   }
 
+  const publishMode = getBasketPublishMode();
+  const scheduledAt = publishMode === "schedule" ? basketScheduleAt.value : "";
+  if (!scheduleIsValid()) {
+    basketStatus.textContent = "กรุณาเลือกเวลาในอนาคต โดยนาทีต้องลงท้าย 00, 05, 10…";
+    basketStatus.dataset.state = "error";
+    basketScheduleAt.focus();
+    return;
+  }
+
   basketFlowRunning = true;
   updateBasketBundle();
   basketStatus.textContent = "กำลังเปิด TikTok Studio…";
@@ -378,6 +639,8 @@ startBasketFlowButton?.addEventListener("click", async () => {
           name: selectedBasketProduct.name,
           imgUrl: selectedBasketProduct.imgUrl,
         },
+        publishMode,
+        scheduledAt,
         updatedAt: Date.now(),
       },
     });
@@ -392,18 +655,30 @@ startBasketFlowButton?.addEventListener("click", async () => {
       caption,
       productId: selectedBasketProduct.id,
       productName: selectedBasketProduct.name,
+      publishMode,
+      scheduledAt,
     });
     if (!response?.ok) {
       if (response?.uploaded) {
-        basketStatus.textContent =
-          `วิดีโออัปโหลดแล้ว แต่ใส่ข้อความ/แฮชแท็กไม่สำเร็จ: ${response.error}`;
+        basketStatus.textContent = response.stage === "validation"
+          ? `ตั้งค่าครบแล้ว แต่การตรวจสอบหรือการโพสต์ไม่สำเร็จ: ${response.error}`
+          : response.stage === "ai-label"
+            ? `เพิ่มสินค้าและตั้งเวลาแล้ว แต่เปิดป้ายเนื้อหาที่สร้างโดย AI ไม่สำเร็จ: ${response.error}`
+            : response.stage === "post-time"
+            ? `เพิ่มสินค้าแล้ว แต่ตั้งค่าเวลาโพสต์ไม่สำเร็จ: ${response.error}`
+            : response.stage === "product-link"
+            ? `วิดีโอและข้อความเรียบร้อยแล้ว แต่เปิดค้นหาสินค้าไม่สำเร็จ: ${response.error}`
+            : `วิดีโออัปโหลดแล้ว แต่ใส่ข้อความ/แฮชแท็กไม่สำเร็จ: ${response.error}`;
         basketStatus.dataset.state = "error";
         return;
       }
       throw new Error(response?.error || "เปิด TikTok Studio ไม่สำเร็จ");
     }
-    basketStatus.textContent =
-      `อัปโหลดวิดีโอและใส่ข้อความเรียบร้อยแล้ว · ชุดงาน Product ID ${selectedBasketProduct.id}`;
+    basketStatus.textContent = response.postTimingConfigured
+      ? publishMode === "schedule"
+        ? `${response.validationSkipped ? `ตรวจลิขสิทธิ์ผ่าน (${response.warning || "ข้าม Lite"})` : "ตรวจสอบผ่าน"} และตั้งเวลาโพสต์ ${new Date(scheduledAt).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })} เรียบร้อยแล้ว`
+        : `${response.validationSkipped ? `ตรวจลิขสิทธิ์ผ่าน (${response.warning || "ข้าม Lite"})` : "ตรวจสอบผ่าน"} และโพสต์ Product ID ${selectedBasketProduct.id} เรียบร้อยแล้ว`
+      : `อัปโหลดวิดีโอและใส่ข้อความเรียบร้อยแล้ว · ชุดงาน Product ID ${selectedBasketProduct.id}`;
     basketStatus.dataset.state = "success";
   } catch (error) {
     console.error("Could not start TikTok basket flow:", error);
@@ -416,6 +691,10 @@ startBasketFlowButton?.addEventListener("click", async () => {
 });
 
 updateSelectedProductCard();
+if (basketScheduleAt) {
+  basketScheduleAt.min = toLocalDateTimeInputValue(new Date(Date.now() + 60 * 1000));
+}
+updatePostTimeUi();
 
 function setStatus(message, { progress = null, state = "working" } = {}) {
   status.textContent = message;

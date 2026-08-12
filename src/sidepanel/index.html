@@ -381,13 +381,50 @@
             </article>
           </section>
 
+          <fieldset class="basket-post-time-step" aria-labelledby="basketPostTimeTitle">
+            <legend class="field-heading">
+              <span class="step-number">04</span>
+              <span>
+                <strong id="basketPostTimeTitle">เวลาโพสต์</strong>
+                <small>เลือกโพสต์ทันที หรือตั้งวันและเวลาล่วงหน้า</small>
+              </span>
+            </legend>
+
+            <div class="post-time-options">
+              <label class="post-time-option is-selected">
+                <input type="radio" name="basketPublishMode" value="now" checked />
+                <span aria-hidden="true">⚡</span>
+                <span><strong>โพสต์ทันที</strong><small>ใช้ตัวเลือก “ตอนนี้” ใน TikTok</small></span>
+              </label>
+              <label class="post-time-option">
+                <input type="radio" name="basketPublishMode" value="schedule" />
+                <span aria-hidden="true">◷</span>
+                <span><strong>ตั้งเวลาโพสต์</strong><small>กำหนดวันและเวลาล่วงหน้า</small></span>
+              </label>
+            </div>
+
+            <div id="basketScheduleField" class="basket-schedule-field" hidden>
+              <label for="basketScheduleAt">
+                <span><strong>วันและเวลาเริ่มต้น</strong><small>คลิปแรกจะใช้เวลานี้</small></span>
+                <input id="basketScheduleAt" type="datetime-local" step="300" />
+              </label>
+              <label for="basketIntervalMinutes">
+                <span><strong>ระยะห่างแต่ละคลิป</strong><small>อย่างน้อย 5 นาที และต้องหาร 5 ลงตัว</small></span>
+                <span class="queue-interval-input">
+                  <input id="basketIntervalMinutes" type="number" min="5" step="5" value="120" />
+                  <small>นาที</small>
+                </span>
+              </label>
+            </div>
+          </fieldset>
+
           <section class="basket-bundle-summary" aria-labelledby="basketBundleTitle">
             <div class="bundle-summary-heading">
               <span>
                 <small>POST PACKAGE</small>
                 <strong id="basketBundleTitle">ชุดงานพร้อมโพสต์</strong>
               </span>
-              <span id="basketBundleProgress" class="bundle-progress">0 / 3</span>
+              <span id="basketBundleProgress" class="bundle-progress">1 / 4</span>
             </div>
             <div class="bundle-summary-row" data-bundle-item="video">
               <span class="bundle-check" aria-hidden="true">1</span>
@@ -401,6 +438,30 @@
               <span class="bundle-check" aria-hidden="true">3</span>
               <span><strong>สินค้า</strong><small id="bundleProductValue">ยังไม่ได้เลือก Product ID</small></span>
             </div>
+            <div class="bundle-summary-row is-complete" data-bundle-item="timing">
+              <span class="bundle-check" aria-hidden="true">✓</span>
+              <span><strong>เวลาโพสต์</strong><small id="bundleTimingValue">โพสต์ทันที</small></span>
+            </div>
+          </section>
+
+          <section class="basket-queue-card" aria-labelledby="basketQueueTitle">
+            <div class="basket-queue-heading">
+              <span>
+                <small>MULTI-CLIP QUEUE</small>
+                <strong id="basketQueueTitle">คิวหลายคลิป</strong>
+              </span>
+              <span id="basketQueueCount" class="bundle-progress">0 คลิป</span>
+            </div>
+            <p>แต่ละคลิปเก็บวิดีโอ ข้อความ และสินค้าที่เลือกเป็นคนละชุด โดยใช้ flow ปักตะกร้าเดิม</p>
+            <button id="addBasketQueueItem" class="queue-add-button" type="button" disabled>
+              <span aria-hidden="true">＋</span>
+              เพิ่มชุดงานปัจจุบันลงคิว
+            </button>
+            <div id="basketQueueList" class="basket-queue-list" aria-live="polite"></div>
+            <button id="startBasketQueue" class="primary-button basket-start-button" type="button" disabled>
+              <span><small>START QUEUE</small>เริ่มโพสต์ทุกคลิปตามคิว</span>
+              <span class="button-icon" aria-hidden="true">→</span>
+            </button>
           </section>
 
           <div id="basketStatus" class="basket-status" role="status" aria-live="polite"></div>

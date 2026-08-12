@@ -1,6 +1,9 @@
 const FLOW_AI_URL = "https://labs.google/fx/tools/flow";
 const TIKTOK_UPLOAD_URL =
   "https://www.tiktok.com/tiktokstudio/upload?from=creator_center&tab=video";
+const TIKTOK_CLICK_SETTLE_MS = 800;
+const TIKTOK_FIELD_SETTLE_MS = 900;
+const TIKTOK_STAGE_SETTLE_MS = 1200;
 const PENDING_PROJECTS_KEY = "pendingFlowProjects";
 // A multi-product batch can legitimately run for several hours.
 // Keep the tab/job mapping alive so cancellation and final cleanup continue
@@ -53,7 +56,7 @@ async function getPendingProject(tabId) {
   return pendingProjects[tabId] ?? null;
 }
 
-async function openOrFocusTikTokUploadPage() {
+async function openOrFocusTikTokUploadPage({ forceFresh = false } = {}) {
   const uploadTabs = await chrome.tabs.query({
     url: ["https://www.tiktok.com/tiktokstudio/upload*"],
   });
@@ -65,9 +68,13 @@ async function openOrFocusTikTokUploadPage() {
     if (Number.isInteger(existingTab.windowId)) {
       await chrome.windows.update(existingTab.windowId, { focused: true });
     }
+    const tab = await chrome.tabs.update(existingTab.id, forceFresh
+      ? { active: true, url: `${TIKTOK_UPLOAD_URL}&flow_queue=${Date.now()}` }
+      : { active: true });
     return {
-      tab: await chrome.tabs.update(existingTab.id, { active: true }),
+      tab,
       reused: true,
+      refreshed: forceFresh,
     };
   }
   return {
@@ -210,9 +217,7 @@ function descriptionMatches(actualValue, expectedValue) {
   const actual = normalizeText(actualValue);
   const expected = normalizeText(expectedValue);
   if (!expected) return true;
-  if (actual === expected || actual.includes(expected)) return true;
-  const hashtags = expected.match(/#[^\s#]+/g) || [];
-  return hashtags.length > 0 && hashtags.every((tag) => actual.includes(tag));
+  return actual === expected;
 }
 
 function findMarkedDescriptionNode(root) {
@@ -244,6 +249,9 @@ async function setTikTokDescription(tabId, description, expectedFilename = "") {
   if (!prepared?.ok) {
     throw new Error(prepared?.error || "ไม่พบช่องคำอธิบายของ TikTok");
   }
+  // The editor is React-controlled and can still be hydrating even after it
+  // becomes visible. Let it settle before selecting its generated filename.
+  await new Promise((resolve) => setTimeout(resolve, TIKTOK_FIELD_SETTLE_MS));
 
   const debuggee = { tabId };
   await chrome.debugger.attach(debuggee, "1.3");
@@ -292,12 +300,63 @@ async function setTikTokDescription(tabId, description, expectedFilename = "") {
     if (selectionResult?.result?.value !== true) {
       throw new Error("เลือกชื่อวิดีโอเดิมในช่องคำอธิบายไม่สำเร็จ");
     }
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", {
+      type: "rawKeyDown",
+      key: "Backspace",
+      code: "Backspace",
+      windowsVirtualKeyCode: 8,
+      nativeVirtualKeyCode: 8,
+    });
+    await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", {
+      type: "keyUp",
+      key: "Backspace",
+      code: "Backspace",
+      windowsVirtualKeyCode: 8,
+      nativeVirtualKeyCode: 8,
+    });
+    await new Promise((resolve) => setTimeout(resolve, TIKTOK_FIELD_SETTLE_MS));
+    const clearedResult = await chrome.debugger.sendCommand(
+      debuggee,
+      "Runtime.callFunctionOn",
+      {
+        objectId: resolvedEditor.object.objectId,
+        functionDeclaration: `function () {
+          const read = () => String("value" in this ? this.value : (this.innerText || this.textContent || ""));
+          if (read().replace(/\\s+/g, " ").trim()) {
+            if ("value" in this) {
+              const prototype = this instanceof HTMLTextAreaElement
+                ? HTMLTextAreaElement.prototype
+                : HTMLInputElement.prototype;
+              Object.getOwnPropertyDescriptor(prototype, "value")?.set?.call(this, "");
+            } else {
+              this.replaceChildren();
+            }
+            this.dispatchEvent(new InputEvent("input", {
+              bubbles: true,
+              composed: true,
+              inputType: "deleteContentBackward",
+              data: null,
+            }));
+            this.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+          this.focus();
+          return read().replace(/\\s+/g, " ").trim();
+        }`,
+        returnByValue: true,
+      },
+    );
+    if (String(clearedResult?.result?.value || "").trim()) {
+      throw new Error("ลบชื่อวิดีโอเดิมในช่องคำอธิบายไม่สำเร็จ");
+    }
+    await new Promise((resolve) => setTimeout(resolve, TIKTOK_FIELD_SETTLE_MS));
     await chrome.debugger.sendCommand(debuggee, "Input.insertText", { text });
   } finally {
     await chrome.debugger.detach(debuggee).catch(() => { });
   }
 
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  // Wait for TikTok to commit the controlled-editor value before reading it.
+  await new Promise((resolve) => setTimeout(resolve, TIKTOK_STAGE_SETTLE_MS));
   const verified = await chrome.tabs.sendMessage(tabId, {
     type: "READ_TIKTOK_DESCRIPTION",
   });
@@ -307,7 +366,7 @@ async function setTikTokDescription(tabId, description, expectedFilename = "") {
       text,
       expectedFilename,
     });
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, TIKTOK_STAGE_SETTLE_MS));
     const fallbackVerified = await chrome.tabs.sendMessage(tabId, {
       type: "READ_TIKTOK_DESCRIPTION",
     });
@@ -324,6 +383,460 @@ async function setTikTokDescription(tabId, description, expectedFilename = "") {
   return true;
 }
 
+function findMarkedProductSearchNode(root) {
+  const nodes = [];
+  const visit = (node) => {
+    if (!node) return;
+    nodes.push(node);
+    for (const child of node.children || []) visit(child);
+    for (const shadowRoot of node.shadowRoots || []) visit(shadowRoot);
+    visit(node.contentDocument);
+  };
+  visit(root);
+  return nodes.find((node) => {
+    const attributes = nodeAttributes(node);
+    return attributes["data-flow-launcher-tiktok-product-search"] === "true";
+  }) || null;
+}
+
+function findMarkedScheduleNode(root, kind) {
+  const attributeName = kind === "time"
+    ? "data-flow-launcher-tiktok-schedule-time"
+    : "data-flow-launcher-tiktok-schedule-date";
+  const nodes = [];
+  const visit = (node) => {
+    if (!node) return;
+    nodes.push(node);
+    for (const child of node.children || []) visit(child);
+    for (const shadowRoot of node.shadowRoots || []) visit(shadowRoot);
+    visit(node.contentDocument);
+  };
+  visit(root);
+  return nodes.find((node) => nodeAttributes(node)[attributeName] === "true") || null;
+}
+
+async function clickTikTokCoordinate(tabId, target) {
+  const x = Number(target?.x);
+  const y = Number(target?.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    throw new Error("ไม่พบตำแหน่งปุ่มที่ต้องคลิกใน TikTok Studio");
+  }
+  const debuggee = { tabId };
+  await chrome.debugger.attach(debuggee, "1.3");
+  try {
+    await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x,
+      y,
+    });
+    await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      x,
+      y,
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+    });
+    await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      x,
+      y,
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+    });
+  } finally {
+    await chrome.debugger.detach(debuggee).catch(() => { });
+  }
+  await new Promise((resolve) => setTimeout(resolve, TIKTOK_CLICK_SETTLE_MS));
+}
+
+async function findAndClickTikTokTarget(tabId, messageType, timeoutMs, payload = {}) {
+  const target = await chrome.tabs.sendMessage(tabId, {
+    type: messageType,
+    timeoutMs,
+    ...payload,
+  });
+  if (!target?.ok) {
+    throw new Error(target?.error || "ไม่พบปุ่มใน TikTok Studio");
+  }
+  if (!target.skipClick) {
+    await clickTikTokCoordinate(tabId, target);
+  }
+  return target;
+}
+
+async function enterTikTokProductId(tabId, productId) {
+  const value = String(productId || "").trim();
+  if (!value) throw new Error("ไม่พบ Product ID สำหรับค้นหาสินค้า");
+
+  const prepared = await chrome.tabs.sendMessage(tabId, {
+    type: "PREPARE_TIKTOK_PRODUCT_SEARCH",
+    timeoutMs: 60 * 1000,
+  });
+  if (!prepared?.ok) {
+    throw new Error(prepared?.error || "ไม่พบช่องค้นหาสินค้าใน TikTok Studio");
+  }
+
+  const debuggee = { tabId };
+  await chrome.debugger.attach(debuggee, "1.3");
+  try {
+    const documentResult = await chrome.debugger.sendCommand(
+      debuggee,
+      "DOM.getDocument",
+      { depth: -1, pierce: true },
+    );
+    const inputNode = findMarkedProductSearchNode(documentResult.root);
+    if (!inputNode?.backendNodeId) {
+      throw new Error("ไม่พบตำแหน่งช่องค้นหาสินค้าใน TikTok Studio");
+    }
+    await chrome.debugger.sendCommand(debuggee, "DOM.focus", {
+      backendNodeId: inputNode.backendNodeId,
+    });
+    const resolvedInput = await chrome.debugger.sendCommand(
+      debuggee,
+      "DOM.resolveNode",
+      { backendNodeId: inputNode.backendNodeId },
+    );
+    if (!resolvedInput?.object?.objectId) {
+      throw new Error("ไม่สามารถเข้าถึงช่องค้นหาสินค้าของ TikTok");
+    }
+    await chrome.debugger.sendCommand(debuggee, "Runtime.callFunctionOn", {
+      objectId: resolvedInput.object.objectId,
+      functionDeclaration: `function () {
+        this.focus();
+        if (typeof this.select === "function") this.select();
+        return true;
+      }`,
+      returnByValue: true,
+    });
+    await chrome.debugger.sendCommand(debuggee, "Input.insertText", { text: value });
+    const readResult = await chrome.debugger.sendCommand(
+      debuggee,
+      "Runtime.callFunctionOn",
+      {
+        objectId: resolvedInput.object.objectId,
+        functionDeclaration: `function () {
+          return String("value" in this ? this.value : (this.innerText || this.textContent || ""));
+        }`,
+        returnByValue: true,
+      },
+    );
+    if (!String(readResult?.result?.value || "").includes(value)) {
+      throw new Error("วาง Product ID ในช่องค้นหาสินค้าไม่สำเร็จ");
+    }
+    await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", {
+      type: "rawKeyDown",
+      key: "Enter",
+      code: "Enter",
+      windowsVirtualKeyCode: 13,
+      nativeVirtualKeyCode: 13,
+    });
+    await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", {
+      type: "keyUp",
+      key: "Enter",
+      code: "Enter",
+      windowsVirtualKeyCode: 13,
+      nativeVirtualKeyCode: 13,
+    });
+  } finally {
+    await chrome.debugger.detach(debuggee).catch(() => { });
+  }
+  await new Promise((resolve) => setTimeout(resolve, TIKTOK_STAGE_SETTLE_MS));
+  return true;
+}
+
+async function prepareTikTokScheduleFields(tabId) {
+  const prepared = await chrome.tabs.sendMessage(tabId, {
+    type: "PREPARE_TIKTOK_SCHEDULE_FIELDS",
+    timeoutMs: 30 * 1000,
+  });
+  if (!prepared?.ok) {
+    throw new Error(prepared?.error || "ไม่พบช่องวันและเวลาสำหรับตั้งเวลาโพสต์");
+  }
+  return prepared;
+}
+
+async function setTikTokScheduleField(tabId, kind, value) {
+  const expected = String(value || "").trim();
+  const debuggee = { tabId };
+  await chrome.debugger.attach(debuggee, "1.3");
+  try {
+    const documentResult = await chrome.debugger.sendCommand(
+      debuggee,
+      "DOM.getDocument",
+      { depth: -1, pierce: true },
+    );
+    const inputNode = findMarkedScheduleNode(documentResult.root, kind);
+    if (!inputNode?.backendNodeId) {
+      throw new Error(`ไม่พบช่อง${kind === "time" ? "เวลา" : "วันที่"}โพสต์ของ TikTok`);
+    }
+    await chrome.debugger.sendCommand(debuggee, "DOM.focus", {
+      backendNodeId: inputNode.backendNodeId,
+    });
+    const resolvedInput = await chrome.debugger.sendCommand(
+      debuggee,
+      "DOM.resolveNode",
+      { backendNodeId: inputNode.backendNodeId },
+    );
+    if (!resolvedInput?.object?.objectId) {
+      throw new Error(`ไม่สามารถเข้าถึงช่อง${kind === "time" ? "เวลา" : "วันที่"}โพสต์`);
+    }
+    await chrome.debugger.sendCommand(debuggee, "Runtime.callFunctionOn", {
+      objectId: resolvedInput.object.objectId,
+      functionDeclaration: `function () {
+        this.focus();
+        if (typeof this.select === "function") this.select();
+        return true;
+      }`,
+      returnByValue: true,
+    });
+    await chrome.debugger.sendCommand(debuggee, "Input.insertText", { text: expected });
+    let readResult = await chrome.debugger.sendCommand(
+      debuggee,
+      "Runtime.callFunctionOn",
+      {
+        objectId: resolvedInput.object.objectId,
+        functionDeclaration: `function () { return String(this.value || this.textContent || ""); }`,
+        returnByValue: true,
+      },
+    );
+    if (!String(readResult?.result?.value || "").includes(expected)) {
+      readResult = await chrome.debugger.sendCommand(
+        debuggee,
+        "Runtime.callFunctionOn",
+        {
+          objectId: resolvedInput.object.objectId,
+          functionDeclaration: `function (nextValue) {
+            if ("value" in this) {
+              const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+              setter?.call(this, nextValue);
+            } else {
+              this.textContent = nextValue;
+            }
+            this.dispatchEvent(new InputEvent("input", {
+              bubbles: true,
+              composed: true,
+              inputType: "insertReplacementText",
+              data: nextValue,
+            }));
+            this.dispatchEvent(new Event("change", { bubbles: true }));
+            return String(this.value || this.textContent || "");
+          }`,
+          arguments: [{ value: expected }],
+          returnByValue: true,
+        },
+      );
+    }
+    if (!String(readResult?.result?.value || "").includes(expected)) {
+      throw new Error(`กรอก${kind === "time" ? "เวลา" : "วันที่"}โพสต์ไม่สำเร็จ`);
+    }
+    await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", {
+      type: "rawKeyDown",
+      key: "Enter",
+      code: "Enter",
+      windowsVirtualKeyCode: 13,
+      nativeVirtualKeyCode: 13,
+    });
+    await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", {
+      type: "keyUp",
+      key: "Enter",
+      code: "Enter",
+      windowsVirtualKeyCode: 13,
+      nativeVirtualKeyCode: 13,
+    });
+  } finally {
+    await chrome.debugger.detach(debuggee).catch(() => { });
+  }
+  await new Promise((resolve) => setTimeout(resolve, TIKTOK_CLICK_SETTLE_MS));
+}
+
+async function configureTikTokPostTime(tabId, publishMode, scheduledAt) {
+  const mode = publishMode === "schedule" ? "schedule" : "now";
+  await findAndClickTikTokTarget(
+    tabId,
+    "FIND_TIKTOK_POST_TIME_RADIO",
+    30 * 1000,
+    { publishMode: mode },
+  );
+  if (mode === "now") return true;
+
+  const scheduledValue = String(scheduledAt || "").trim();
+  const match = scheduledValue.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+  if (!match) throw new Error("รูปแบบวันและเวลาที่ตั้งไว้ไม่ถูกต้อง");
+  const [, dateValue, timeValue] = match;
+  const [hourValue, minuteValue] = timeValue.split(":");
+
+  const currentTime = await chrome.tabs.sendMessage(tabId, {
+    type: "READ_TIKTOK_SCHEDULE_VALUE",
+    kind: "time",
+  });
+  if (String(currentTime?.value || "").trim() !== timeValue) {
+    await findAndClickTikTokTarget(
+      tabId,
+      "FIND_TIKTOK_SCHEDULE_CONTROL",
+      30 * 1000,
+      { kind: "time" },
+    );
+    await findAndClickTikTokTarget(
+      tabId,
+      "FIND_TIKTOK_TIME_OPTION",
+      30 * 1000,
+      { kind: "hour", value: hourValue },
+    );
+    await findAndClickTikTokTarget(
+      tabId,
+      "FIND_TIKTOK_TIME_OPTION",
+      30 * 1000,
+      { kind: "minute", value: minuteValue },
+    );
+  }
+
+  const currentDate = await chrome.tabs.sendMessage(tabId, {
+    type: "READ_TIKTOK_SCHEDULE_VALUE",
+    kind: "date",
+  });
+  if (String(currentDate?.value || "").trim() !== dateValue) {
+    await findAndClickTikTokTarget(
+      tabId,
+      "FIND_TIKTOK_SCHEDULE_CONTROL",
+      30 * 1000,
+      { kind: "date" },
+    );
+    await findAndClickTikTokTarget(
+      tabId,
+      "FIND_TIKTOK_DATE_OPTION",
+      30 * 1000,
+      { dateValue },
+    );
+  }
+  return true;
+}
+
+async function openTikTokProductLinkSearch(tabId, productId) {
+  await findAndClickTikTokTarget(tabId, "FIND_TIKTOK_ADD_LINK_BUTTON", 60 * 1000);
+  await findAndClickTikTokTarget(tabId, "FIND_TIKTOK_LINK_NEXT_BUTTON", 30 * 1000);
+  await enterTikTokProductId(tabId, productId);
+  await findAndClickTikTokTarget(
+    tabId,
+    "FIND_TIKTOK_PRODUCT_RADIO",
+    60 * 1000,
+    { productId },
+  );
+  await findAndClickTikTokTarget(
+    tabId,
+    "FIND_TIKTOK_PRODUCT_NEXT_BUTTON",
+    30 * 1000,
+    { productId },
+  );
+  await findAndClickTikTokTarget(
+    tabId,
+    "FIND_TIKTOK_CONFIRM_ADD_BUTTON",
+    30 * 1000,
+  );
+  return true;
+}
+
+async function enableTikTokAiGeneratedContent(tabId) {
+  await findAndClickTikTokTarget(
+    tabId,
+    "FIND_TIKTOK_SHOW_MORE_BUTTON",
+    30 * 1000,
+  );
+  await new Promise((resolve) => setTimeout(resolve, TIKTOK_CLICK_SETTLE_MS));
+  const toggleTarget = await findAndClickTikTokTarget(
+    tabId,
+    "FIND_TIKTOK_AI_CONTENT_TOGGLE",
+    30 * 1000,
+  );
+
+  if (toggleTarget.stateReadable === false) {
+    await new Promise((resolve) => setTimeout(resolve, TIKTOK_FIELD_SETTLE_MS));
+    return true;
+  }
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 8 * 1000) {
+    const state = await chrome.tabs.sendMessage(tabId, {
+      type: "READ_TIKTOK_AI_CONTENT_TOGGLE",
+    });
+    if (state?.enabled) return true;
+    await new Promise((resolve) => setTimeout(resolve, 350));
+  }
+  throw new Error('เปิดสวิตช์ "เนื้อหาที่สร้างโดย AI" ไม่สำเร็จ');
+}
+
+async function waitForTikTokValidationAndPublish(tabId, publishMode) {
+  let validation = await chrome.tabs.sendMessage(tabId, {
+    type: "WAIT_FOR_TIKTOK_VALIDATION",
+    timeoutMs: 15 * 60 * 1000,
+  });
+  if (validation?.needsDisableLite) {
+    await findAndClickTikTokTarget(
+      tabId,
+      "FIND_TIKTOK_DISABLE_LITE_TOGGLE",
+      30 * 1000,
+    );
+    const startedAt = Date.now();
+    let disabled = false;
+    while (Date.now() - startedAt < 8 * 1000) {
+      const state = await chrome.tabs.sendMessage(tabId, {
+        type: "READ_TIKTOK_LITE_TOGGLE",
+      });
+      if (state?.ok && !state.enabled) {
+        disabled = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    }
+    if (!disabled) {
+      throw new Error('ปิดสวิตช์ "การตรวจสอบเนื้อหาแบบ Lite" ไม่สำเร็จ');
+    }
+    validation = {
+      ...validation,
+      ok: true,
+      ready: true,
+      validationSkipped: true,
+      warning: validation.warning || "ปิด Lite เพราะเนื้อหาอาจถูกจำกัด",
+    };
+  }
+  if (!validation?.ok || !validation.ready) {
+    throw new Error(validation?.error || "การตรวจสอบของ TikTok ยังไม่เสร็จ");
+  }
+  await new Promise((resolve) => setTimeout(resolve, TIKTOK_CLICK_SETTLE_MS));
+  await findAndClickTikTokTarget(
+    tabId,
+    "FIND_TIKTOK_FINAL_PUBLISH_BUTTON",
+    30 * 1000,
+    { publishMode: publishMode === "schedule" ? "schedule" : "now" },
+  );
+  return {
+    ok: true,
+    validationSkipped: Boolean(validation.validationSkipped),
+    warning: String(validation.warning || ""),
+  };
+}
+
+async function sendTikTokFlowStatus(tabId, options = {}) {
+  if (!Number.isInteger(tabId)) return;
+  const queueIndex = Math.max(1, Number(options.queueIndex) || 1);
+  const queueTotal = Math.max(queueIndex, Number(options.queueTotal) || 1);
+  const localProgress = Math.max(0, Math.min(100, Number(options.localProgress) || 0));
+  const overallProgress = Math.round(
+    (((queueIndex - 1) * 100) + localProgress) / queueTotal,
+  );
+  await chrome.tabs.sendMessage(tabId, {
+    type: "SHOW_TIKTOK_FLOW_STATUS",
+    detail: String(options.detail || "กำลังเตรียม TikTok Studio…"),
+    stageLabel: String(options.stageLabel || "กำลังดำเนินการ"),
+    state: String(options.state || "working"),
+    progress: overallProgress,
+    queueIndex,
+    queueTotal,
+    startedAt: Number(options.startedAt) || Date.now(),
+  }).catch(() => {});
+}
+
 chrome.runtime.onInstalled.addListener(enableSidePanel);
 chrome.runtime.onStartup.addListener(enableSidePanel);
 
@@ -335,32 +848,161 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "uploadVideoToTikTokStudio") {
     void (async () => {
       let videoUploaded = false;
+      let stage = "upload";
+      let tabId = null;
+      let localProgress = 0;
+      const queueIndex = Math.max(1, Number(message.queueIndex) || 1);
+      const queueTotal = Math.max(queueIndex, Number(message.queueTotal) || 1);
+      const flowStartedAt = Number(message.queueStartedAt) || Date.now();
+      const reportStatus = async (detail, stageLabel, progress, state = "working") => {
+        localProgress = progress;
+        await sendTikTokFlowStatus(tabId, {
+          detail,
+          stageLabel,
+          localProgress: progress,
+          state,
+          queueIndex,
+          queueTotal,
+          startedAt: flowStartedAt,
+        });
+      };
       try {
         const localPath = String(message.localPath || "");
         if (!localPath) {
           throw new Error("ไม่พบ path ของไฟล์วิดีโอชั่วคราว");
         }
-        const { tab, reused } = await openOrFocusTikTokUploadPage();
+        const forceFreshUpload = Boolean(message.forceFreshUpload);
+        const { tab, reused } = await openOrFocusTikTokUploadPage({
+          forceFresh: forceFreshUpload,
+        });
+        tabId = tab.id;
         await waitForTabComplete(tab.id);
         await ensureTikTokUploadMonitor(tab.id);
-        const existingUpload = await chrome.tabs.sendMessage(tab.id, {
-          type: "CHECK_TIKTOK_VIDEO_UPLOAD_READY",
-          expectedFilename: message.originalName,
-        });
-        if (!existingUpload?.ready) {
+        await reportStatus(
+          `กำลังเตรียมคลิป ${queueIndex}/${queueTotal}`,
+          "เตรียม TikTok Studio",
+          5,
+        );
+        const existingUpload = forceFreshUpload
+          ? { ready: false }
+          : await chrome.tabs.sendMessage(tab.id, {
+            type: "CHECK_TIKTOK_VIDEO_UPLOAD_READY",
+            expectedFilename: message.originalName,
+          });
+        if (forceFreshUpload || !existingUpload?.ready) {
+          await reportStatus(
+            "กำลังส่งไฟล์วิดีโอไปยังช่องอัปโหลด…",
+            "อัปโหลดวิดีโอ",
+            12,
+          );
           await setTikTokVideoFile(tab.id, localPath);
+          await reportStatus(
+            "TikTok กำลังประมวลผลวิดีโอ กรุณารอสักครู่…",
+            "อัปโหลดวิดีโอ",
+            20,
+          );
           await waitForTikTokUploadComplete(tab.id);
         }
         videoUploaded = true;
+        await reportStatus(
+          "อัปโหลดวิดีโอเสร็จแล้ว กำลังเตรียมรายละเอียด…",
+          "อัปโหลดวิดีโอ",
+          30,
+        );
+        await new Promise((resolve) => setTimeout(resolve, TIKTOK_STAGE_SETTLE_MS));
+        stage = "caption";
+        await reportStatus(
+          "กำลังใส่ข้อความและแฮชแท็ก…",
+          "คำอธิบายวิดีโอ",
+          36,
+        );
         const captionApplied = await setTikTokDescription(
           tab.id,
           message.caption,
           message.originalName,
         );
-        sendResponse({ ok: true, reused, tabId: tab.id, captionApplied });
+        let productSearchStarted = false;
+        if (String(message.productId || "").trim()) {
+          // Description/hashtags must be fully committed before opening the
+          // product modal; otherwise TikTok can restore the generated title.
+          await new Promise((resolve) => setTimeout(resolve, TIKTOK_STAGE_SETTLE_MS));
+          stage = "product-link";
+          await reportStatus(
+            `กำลังผูกสินค้า ${String(message.productName || message.productId || "").trim()}…`,
+            "ปักตะกร้าสินค้า",
+            48,
+          );
+          productSearchStarted = await openTikTokProductLinkSearch(
+            tab.id,
+            message.productId,
+          );
+          stage = "post-time";
+          await reportStatus(
+            message.publishMode === "schedule"
+              ? "กำลังตั้งวันและเวลาโพสต์…"
+              : "กำลังตั้งค่าโพสต์ทันที…",
+            "ตั้งเวลาโพสต์",
+            63,
+          );
+          await configureTikTokPostTime(
+            tab.id,
+            message.publishMode,
+            message.scheduledAt,
+          );
+          stage = "ai-label";
+          await reportStatus(
+            "กำลังเปิดป้ายเนื้อหาที่สร้างโดย AI…",
+            "ตั้งค่าเนื้อหา AI",
+            74,
+          );
+          await enableTikTokAiGeneratedContent(tab.id);
+          stage = "validation";
+          await reportStatus(
+            "กำลังรอ TikTok ตรวจสอบวิดีโอให้เสร็จ…",
+            "ตรวจสอบก่อนโพสต์",
+            84,
+          );
+          var publishResult = await waitForTikTokValidationAndPublish(
+            tab.id,
+            message.publishMode,
+          );
+        }
+        await reportStatus(
+          productSearchStarted
+            ? `คลิป ${queueIndex}/${queueTotal} โพสต์เรียบร้อยแล้ว`
+            : "เตรียมวิดีโอและคำอธิบายเรียบร้อยแล้ว",
+          productSearchStarted ? "สำเร็จ" : "พร้อมใช้งาน",
+          100,
+          queueIndex === queueTotal ? "success" : "working",
+        );
+        sendResponse({
+          ok: true,
+          reused,
+          refreshedForQueue: forceFreshUpload,
+          tabId: tab.id,
+          captionApplied,
+          productSearchStarted,
+          postTimingConfigured: productSearchStarted,
+          aiContentLabeled: productSearchStarted,
+          published: productSearchStarted,
+          validationSkipped: Boolean(publishResult?.validationSkipped),
+          warning: String(publishResult?.warning || ""),
+          productId: String(message.productId || "").trim(),
+        });
       } catch (error) {
         console.error("Could not upload video to TikTok Studio:", error);
-        sendResponse({ ok: false, uploaded: videoUploaded, error: String(error) });
+        await reportStatus(
+          `หยุดที่ขั้นตอน ${stage}: ${String(error)}`,
+          "ดำเนินการไม่สำเร็จ",
+          localProgress,
+          "error",
+        );
+        sendResponse({
+          ok: false,
+          uploaded: videoUploaded,
+          stage,
+          error: String(error),
+        });
       }
     })();
     return true;
