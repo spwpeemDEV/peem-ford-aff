@@ -193,7 +193,7 @@
         class="sidebar-page basket-page"
         data-panel-page
         hidden
-        aria-labelledby="basketPageTitle"
+        aria-label="ปักตะกร้าสินค้า"
       >
         <button id="backToCreation" class="page-back-button" type="button">
           <span aria-hidden="true">←</span>
@@ -301,15 +301,6 @@
           </div>
         </section>
 
-        <div class="basket-hero-card">
-          <span class="basket-hero-icon" aria-hidden="true">🛒</span>
-          <p class="section-kicker">TIKTOK PRODUCT</p>
-          <h1 id="basketPageTitle">ปักตะกร้าสินค้า</h1>
-          <p>
-            หน้านี้เตรียมไว้สำหรับเลือกวิดีโอและเชื่อมสินค้าเข้ากับโพสต์ TikTok
-          </p>
-        </div>
-
         <div class="basket-form-card">
           <label class="field upload-field basket-video-field">
             <span class="field-heading">
@@ -416,33 +407,12 @@
                 </span>
               </label>
             </div>
-          </fieldset>
 
-          <section class="basket-bundle-summary" aria-labelledby="basketBundleTitle">
-            <div class="bundle-summary-heading">
-              <span>
-                <small>POST PACKAGE</small>
-                <strong id="basketBundleTitle">ชุดงานพร้อมโพสต์</strong>
-              </span>
-              <span id="basketBundleProgress" class="bundle-progress">1 / 4</span>
-            </div>
-            <div class="bundle-summary-row" data-bundle-item="video">
-              <span class="bundle-check" aria-hidden="true">1</span>
-              <span><strong>วิดีโอ</strong><small id="bundleVideoValue">ยังไม่ได้เลือก</small></span>
-            </div>
-            <div class="bundle-summary-row" data-bundle-item="caption">
-              <span class="bundle-check" aria-hidden="true">2</span>
-              <span><strong>ข้อความและแฮชแท็ก</strong><small id="bundleCaptionValue">ยังไม่ได้กรอก</small></span>
-            </div>
-            <div class="bundle-summary-row" data-bundle-item="product">
-              <span class="bundle-check" aria-hidden="true">3</span>
-              <span><strong>สินค้า</strong><small id="bundleProductValue">ยังไม่ได้เลือก Product ID</small></span>
-            </div>
-            <div class="bundle-summary-row is-complete" data-bundle-item="timing">
-              <span class="bundle-check" aria-hidden="true">✓</span>
-              <span><strong>เวลาโพสต์</strong><small id="bundleTimingValue">โพสต์ทันที</small></span>
-            </div>
-          </section>
+            <button id="addBasketQueueItem" class="queue-add-button post-time-queue-button" type="button" disabled>
+              <span aria-hidden="true">＋</span>
+              เพิ่มชุดงานปัจจุบันลงคิว
+            </button>
+          </fieldset>
 
           <section class="basket-queue-card" aria-labelledby="basketQueueTitle">
             <div class="basket-queue-heading">
@@ -453,10 +423,6 @@
               <span id="basketQueueCount" class="bundle-progress">0 คลิป</span>
             </div>
             <p>แต่ละคลิปเก็บวิดีโอ ข้อความ และสินค้าที่เลือกเป็นคนละชุด โดยใช้ flow ปักตะกร้าเดิม</p>
-            <button id="addBasketQueueItem" class="queue-add-button" type="button" disabled>
-              <span aria-hidden="true">＋</span>
-              เพิ่มชุดงานปัจจุบันลงคิว
-            </button>
             <div id="basketQueueList" class="basket-queue-list" aria-live="polite"></div>
             <button id="startBasketQueue" class="primary-button basket-start-button" type="button" disabled>
               <span><small>START QUEUE</small>เริ่มโพสต์ทุกคลิปตามคิว</span>
@@ -475,6 +441,44 @@
           </button>
         </div>
       </section>
+
+      <dialog id="basketProductModal" class="product-picker-modal" aria-labelledby="basketProductModalTitle">
+        <div class="product-picker-modal-shell">
+          <header class="product-picker-modal-header">
+            <span>
+              <small>SELECT PRODUCT</small>
+              <strong id="basketProductModalTitle">เลือกสินค้าที่จะปักตะกร้า</strong>
+            </span>
+            <button id="closeBasketProductModal" type="button" aria-label="ปิดหน้าต่างเลือกสินค้า">×</button>
+          </header>
+
+          <label class="product-search-field product-picker-modal-search" for="basketProductModalSearch">
+            <span aria-hidden="true">⌕</span>
+            <input
+              id="basketProductModalSearch"
+              type="search"
+              autocomplete="off"
+              placeholder="ค้นหาชื่อสินค้า หรือ Product ID"
+            />
+          </label>
+
+          <div class="product-picker-modal-meta">
+            <span>แตะสินค้าที่ต้องการเพื่อเลือกทันที</span>
+            <strong id="basketProductModalCount">0 สินค้า</strong>
+          </div>
+
+          <div
+            id="basketProductModalList"
+            class="product-picker-modal-list"
+            role="listbox"
+            aria-label="เลือกสินค้าสำหรับปักตะกร้า"
+          ></div>
+
+          <footer class="product-picker-modal-footer">
+            <button id="cancelBasketProductModal" type="button">ยกเลิก</button>
+          </footer>
+        </div>
+      </dialog>
     </main>
 
     <script src="app.js"></script>

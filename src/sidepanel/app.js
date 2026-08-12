@@ -39,20 +39,20 @@ const selectedProductImage = document.querySelector("#selectedProductImage");
 const selectedProductName = document.querySelector("#selectedProductName");
 const selectedProductId = document.querySelector("#selectedProductId");
 const changeSelectedProductButton = document.querySelector("#changeSelectedProduct");
-const basketBundleProgress = document.querySelector("#basketBundleProgress");
-const bundleVideoValue = document.querySelector("#bundleVideoValue");
-const bundleCaptionValue = document.querySelector("#bundleCaptionValue");
-const bundleProductValue = document.querySelector("#bundleProductValue");
-const bundleTimingValue = document.querySelector("#bundleTimingValue");
 const basketPublishModeInputs = [...document.querySelectorAll('input[name="basketPublishMode"]')];
 const basketScheduleField = document.querySelector("#basketScheduleField");
 const basketScheduleAt = document.querySelector("#basketScheduleAt");
 const basketIntervalMinutes = document.querySelector("#basketIntervalMinutes");
-const basketBundleRows = [...document.querySelectorAll("[data-bundle-item]")];
 const addBasketQueueItemButton = document.querySelector("#addBasketQueueItem");
 const startBasketQueueButton = document.querySelector("#startBasketQueue");
 const basketQueueList = document.querySelector("#basketQueueList");
 const basketQueueCount = document.querySelector("#basketQueueCount");
+const basketProductModal = document.querySelector("#basketProductModal");
+const basketProductModalSearch = document.querySelector("#basketProductModalSearch");
+const basketProductModalList = document.querySelector("#basketProductModalList");
+const basketProductModalCount = document.querySelector("#basketProductModalCount");
+const closeBasketProductModalButton = document.querySelector("#closeBasketProductModal");
+const cancelBasketProductModalButton = document.querySelector("#cancelBasketProductModal");
 
 let activeTabId = null;
 let nextProductId = 1;
@@ -288,21 +288,74 @@ function renderBasketQueue() {
   startBasketQueueButton.dataset.running = String(basketFlowRunning);
 }
 
-function scrollToProductPicker() {
-  productSyncCard?.scrollIntoView({ behavior: "smooth", block: "start" });
-  window.setTimeout(() => {
-    if (syncedProducts.length) {
-      syncedProductSearch?.focus();
-    } else {
-      syncTiktokBtn?.focus();
-    }
-  }, 250);
+function closeBasketProductPicker() {
+  if (basketProductModal?.open) basketProductModal.close();
+}
+
+function renderBasketProductPicker() {
+  if (!basketProductModalList) return;
+  const query = basketProductModalSearch?.value.trim().toLocaleLowerCase("th") || "";
+  const visibleProducts = syncedProducts.filter((product) =>
+    `${product.name} ${product.id}`.toLocaleLowerCase("th").includes(query),
+  );
+
+  basketProductModalList.replaceChildren();
+  for (const product of visibleProducts) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "product-picker-modal-item";
+    item.dataset.productId = product.id;
+    item.setAttribute("role", "option");
+    item.setAttribute("aria-selected", String(selectedBasketProduct?.id === product.id));
+    item.classList.toggle("is-selected", selectedBasketProduct?.id === product.id);
+
+    const image = document.createElement("img");
+    image.src = product.imgUrl;
+    image.alt = "";
+    const copy = document.createElement("span");
+    const name = document.createElement("strong");
+    name.textContent = product.name;
+    const id = document.createElement("small");
+    id.textContent = `Product ID: ${product.id}`;
+    copy.append(name, id);
+    const indicator = document.createElement("span");
+    indicator.className = "product-picker-modal-indicator";
+    indicator.textContent = selectedBasketProduct?.id === product.id ? "✓ เลือกแล้ว" : "เลือก";
+    item.append(image, copy, indicator);
+    item.addEventListener("click", () => {
+      selectSyncedProduct(product.id);
+      closeBasketProductPicker();
+      chooseSyncedProductButton?.focus();
+    });
+    basketProductModalList.appendChild(item);
+  }
+
+  if (!visibleProducts.length) {
+    const empty = document.createElement("div");
+    empty.className = "product-picker-modal-empty";
+    const title = document.createElement("strong");
+    title.textContent = syncedProducts.length ? "ไม่พบสินค้าที่ค้นหา" : "ยังไม่มีสินค้าใน TikTok Sync";
+    const detail = document.createElement("small");
+    detail.textContent = syncedProducts.length
+      ? "ลองค้นหาด้วยชื่ออื่นหรือ Product ID"
+      : "กรุณาดึงข้อมูลสินค้าก่อน แล้วกลับมาเปิดรายการนี้อีกครั้ง";
+    empty.append(title, detail);
+    basketProductModalList.appendChild(empty);
+  }
+  basketProductModalCount.textContent = `${visibleProducts.length} สินค้า`;
+}
+
+function openBasketProductPicker() {
+  if (!basketProductModal) return;
+  basketProductModalSearch.value = "";
+  renderBasketProductPicker();
+  if (!basketProductModal.open) basketProductModal.showModal();
+  window.setTimeout(() => basketProductModalSearch?.focus(), 100);
 }
 
 function updateBasketBundle() {
   const file = basketVideoInput?.files?.[0] || null;
   const caption = basketCaption?.value.trim() || "";
-  const publishMode = getBasketPublishMode();
   const timingReady = scheduleIsValid() && basketIntervalIsValid();
   const completed = [
     Boolean(file),
@@ -311,31 +364,7 @@ function updateBasketBundle() {
     timingReady,
   ];
 
-  bundleVideoValue.textContent = file
-    ? `${file.name} · ${formatFileSize(file.size)}`
-    : "ยังไม่ได้เลือก";
-  bundleCaptionValue.textContent = caption
-    ? `${caption.length} ตัวอักษร · ${countHashtags(caption)} แฮชแท็ก`
-    : "ยังไม่ได้กรอก";
-  bundleProductValue.textContent = selectedBasketProduct
-    ? `${selectedBasketProduct.name} · ID ${selectedBasketProduct.id}`
-    : "ยังไม่ได้เลือก Product ID";
-  bundleTimingValue.textContent = publishMode === "now"
-    ? "โพสต์ทันที"
-    : timingReady
-      ? `ตั้งเวลา ${new Date(getScheduleTimestamp()).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })}`
-      : "เลือกเวลาอนาคต โดยนาทีต้องลงท้าย 00, 05, 10…";
-
-  basketBundleRows.forEach((row, index) => {
-    const complete = completed[index];
-    row.classList.toggle("is-complete", complete);
-    const check = row.querySelector(".bundle-check");
-    if (check) check.textContent = complete ? "✓" : String(index + 1);
-  });
-
   const completeCount = completed.filter(Boolean).length;
-  basketBundleProgress.textContent = `${completeCount} / 4`;
-  basketBundleProgress.classList.toggle("is-complete", completeCount === 4);
   startBasketFlowButton.disabled = basketFlowRunning || completeCount !== 4;
   startBasketFlowButton.dataset.running = String(basketFlowRunning);
   addBasketQueueItemButton.disabled = basketFlowRunning || completeCount !== 4;
@@ -363,6 +392,7 @@ function selectSyncedProduct(productId) {
   selectedBasketProduct = syncedProducts.find((product) => product.id === productId) || null;
   updateSelectedProductCard();
   renderSyncedProducts();
+  renderBasketProductPicker();
   if (selectedBasketProduct) {
     basketStatus.textContent = `เลือก ${selectedBasketProduct.name} แล้ว ชุดงานนี้จะใช้ Product ID ${selectedBasketProduct.id}`;
     basketStatus.dataset.state = "ready";
@@ -417,6 +447,7 @@ function renderSyncedProducts() {
   const hasProducts = syncedProducts.length > 0;
   productSearchField.hidden = !hasProducts;
   tiktokIdOutput.hidden = !hasProducts;
+  renderBasketProductPicker();
 }
 
 function resetSyncedProducts() {
@@ -428,8 +459,14 @@ function resetSyncedProducts() {
 }
 
 syncedProductSearch?.addEventListener("input", renderSyncedProducts);
-chooseSyncedProductButton?.addEventListener("click", scrollToProductPicker);
-changeSelectedProductButton?.addEventListener("click", scrollToProductPicker);
+basketProductModalSearch?.addEventListener("input", renderBasketProductPicker);
+chooseSyncedProductButton?.addEventListener("click", openBasketProductPicker);
+changeSelectedProductButton?.addEventListener("click", openBasketProductPicker);
+closeBasketProductModalButton?.addEventListener("click", closeBasketProductPicker);
+cancelBasketProductModalButton?.addEventListener("click", closeBasketProductPicker);
+basketProductModal?.addEventListener("click", (event) => {
+  if (event.target === basketProductModal) closeBasketProductPicker();
+});
 for (const input of basketPublishModeInputs) {
   input.addEventListener("change", () => updatePostTimeUi({ setDefault: true }));
 }
@@ -623,7 +660,7 @@ startBasketFlowButton?.addEventListener("click", async () => {
   if (!selectedBasketProduct) {
     basketStatus.textContent = "กรุณาเลือกสินค้าจาก TikTok Sync เพื่อผูก Product ID";
     basketStatus.dataset.state = "error";
-    scrollToProductPicker();
+    openBasketProductPicker();
     return;
   }
 
