@@ -12,6 +12,12 @@ const addProductButton = document.querySelector("#addProduct");
 const productCount = document.querySelector("#productCount");
 const loopCount = document.querySelector("#loopCount");
 const jobSummary = document.querySelector("#jobSummary");
+const imageBatchDropzone = document.querySelector("#imageBatchDropzone");
+const chooseMultipleImagesButton = document.querySelector("#chooseMultipleImages");
+const chooseImageFolderButton = document.querySelector("#chooseImageFolder");
+const multipleImageInput = document.querySelector("#multipleImageInput");
+const imageFolderInput = document.querySelector("#imageFolderInput");
+const imageBatchStatus = document.querySelector("#imageBatchStatus");
 const cancelButton = document.querySelector("#cancelAutomation");
 const syncTiktokBtn = document.querySelector("#syncTiktokBtn");
 const cancelSyncBtn = document.querySelector("#cancelSyncBtn");
@@ -27,8 +33,20 @@ const panelTabs = [...document.querySelectorAll("[data-panel-target]")];
 const panelPages = [...document.querySelectorAll("[data-panel-page]")];
 const backToCreationButton = document.querySelector("#backToCreation");
 const basketVideoInput = document.querySelector("#basketVideoInput");
+const basketVideoBatchDropzone = document.querySelector("#basketVideoBatchDropzone");
+const chooseMultipleVideosButton = document.querySelector("#chooseMultipleVideos");
+const chooseVideoFolderButton = document.querySelector("#chooseVideoFolder");
+const multipleVideoInput = document.querySelector("#multipleVideoInput");
+const videoFolderInput = document.querySelector("#videoFolderInput");
+const basketVideoBatchStatus = document.querySelector("#basketVideoBatchStatus");
+const basketVideoBatchList = document.querySelector("#basketVideoBatchList");
+const clearBasketVideoBatchButton = document.querySelector("#clearBasketVideoBatch");
 const basketVideoFileName = document.querySelector("#basketVideoFileName");
 const basketVideoFileMeta = document.querySelector("#basketVideoFileMeta");
+const basketVideoPreviewCard = document.querySelector("#basketVideoPreviewCard");
+const basketVideoPreview = document.querySelector("#basketVideoPreview");
+const basketVideoPreviewName = document.querySelector("#basketVideoPreviewName");
+const basketVideoPreviewDuration = document.querySelector("#basketVideoPreviewDuration");
 const basketCaption = document.querySelector("#basketCaption");
 const basketCaptionCount = document.querySelector("#basketCaptionCount");
 const basketStatus = document.querySelector("#basketStatus");
@@ -58,7 +76,11 @@ let activeTabId = null;
 let nextProductId = 1;
 const previewUrls = new Map();
 const MAX_PRODUCTS = 10;
+const MAX_BATCH_VIDEOS = 30;
+const MAX_TIKTOK_VIDEO_SIZE_BYTES = 30 * 1024 * 1024 * 1024;
 let stagedBasketVideo = null;
+let pendingBasketVideos = [];
+let basketVideoPreviewUrl = "";
 let syncedProducts = [];
 let selectedBasketProduct = null;
 let basketFlowRunning = false;
@@ -473,21 +495,220 @@ for (const input of basketPublishModeInputs) {
 basketScheduleAt?.addEventListener("input", updateBasketBundle);
 basketIntervalMinutes?.addEventListener("input", updateBasketBundle);
 
-basketVideoInput?.addEventListener("change", () => {
-  const file = basketVideoInput.files?.[0];
+function isSupportedVideo(file) {
+  return Boolean(file) && (
+    ["video/mp4", "video/quicktime", "video/webm"].includes(file.type) ||
+    /\.(?:mp4|mov|webm)$/i.test(file.name)
+  );
+}
+
+function formatVideoDuration(totalSeconds) {
+  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "--:--";
+  const roundedSeconds = Math.floor(totalSeconds);
+  const minutes = Math.floor(roundedSeconds / 60);
+  const seconds = roundedSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function updateBasketVideoPreview(file) {
+  if (basketVideoPreviewUrl) {
+    URL.revokeObjectURL(basketVideoPreviewUrl);
+    basketVideoPreviewUrl = "";
+  }
+
+  basketVideoPreview.removeAttribute("src");
+  basketVideoPreview.load();
+  basketVideoPreviewCard.hidden = !file;
+  basketVideoPreviewName.textContent = file?.name || "";
+  basketVideoPreviewDuration.textContent = "--:--";
+  if (!file) return;
+
+  basketVideoPreviewUrl = URL.createObjectURL(file);
+  basketVideoPreview.src = basketVideoPreviewUrl;
+  basketVideoPreview.load();
+}
+
+basketVideoPreview?.addEventListener("loadedmetadata", () => {
+  basketVideoPreviewDuration.textContent = formatVideoDuration(basketVideoPreview.duration);
+});
+
+basketVideoPreview?.addEventListener("error", () => {
+  basketVideoPreviewDuration.textContent = "เปิดตัวอย่างไม่ได้";
+});
+
+function setCurrentBasketVideo(file, { announce = true } = {}) {
   stagedBasketVideo = null;
   if (!file) {
+    basketVideoInput.value = "";
     basketVideoFileName.textContent = "เลือกวิดีโอ";
     basketVideoFileMeta.textContent = "คลิกเพื่อเลือกไฟล์ที่ต้องการโพสต์";
+    updateBasketVideoPreview(null);
     updateBasketBundle();
     return;
   }
+  const transfer = new DataTransfer();
+  transfer.items.add(file);
+  basketVideoInput.files = transfer.files;
   basketVideoFileName.textContent = file.name;
   basketVideoFileMeta.textContent = `${formatFileSize(file.size)} · ${file.type || "วิดีโอ"}`;
-  basketStatus.textContent = "เลือกวิดีโอแล้ว กรุณาใส่ข้อความและเลือกสินค้าที่จะผูก";
-  basketStatus.dataset.state = "ready";
+  updateBasketVideoPreview(file);
+  if (announce) {
+    basketStatus.textContent = "เลือกวิดีโอแล้ว กรุณาใส่ข้อความและเลือกสินค้าที่จะผูก";
+    basketStatus.dataset.state = "ready";
+  }
   updateBasketBundle();
+}
+
+function renderPendingBasketVideos() {
+  basketVideoBatchList.replaceChildren();
+  pendingBasketVideos.forEach((file, index) => {
+    const row = document.createElement("article");
+    row.className = "basket-video-batch-item";
+
+    const order = document.createElement("span");
+    order.className = "basket-video-batch-order";
+    order.textContent = index + 1;
+
+    const copy = document.createElement("span");
+    copy.className = "basket-video-batch-copy";
+    const name = document.createElement("strong");
+    name.textContent = file.name;
+    const meta = document.createElement("small");
+    meta.textContent = formatFileSize(file.size);
+    copy.append(name, meta);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", `นำ ${file.name} ออกจากคลิปรอ`);
+    remove.addEventListener("click", () => {
+      pendingBasketVideos.splice(index, 1);
+      renderPendingBasketVideos();
+    });
+    row.append(order, copy, remove);
+    basketVideoBatchList.appendChild(row);
+  });
+
+  basketVideoBatchStatus.textContent = pendingBasketVideos.length
+    ? `มี ${pendingBasketVideos.length} คลิปรอถัดไป`
+    : "ยังไม่มีคลิปรอทำงาน";
+  basketVideoBatchStatus.dataset.state = pendingBasketVideos.length ? "ready" : "empty";
+  clearBasketVideoBatchButton.hidden = !pendingBasketVideos.length;
+}
+
+function loadNextPendingBasketVideo() {
+  const nextFile = pendingBasketVideos.shift() || null;
+  setCurrentBasketVideo(nextFile, { announce: false });
+  renderPendingBasketVideos();
+  if (nextFile) {
+    basketStatus.textContent = `โหลดคลิปถัดไปแล้ว: ${nextFile.name}`;
+    basketStatus.dataset.state = "ready";
+  }
+}
+
+function importVideoFiles(files) {
+  const incomingFiles = [...files];
+  const supportedFiles = incomingFiles.filter(isSupportedVideo);
+  const oversizedFiles = supportedFiles.filter((file) => file.size > MAX_TIKTOK_VIDEO_SIZE_BYTES);
+  const existingFingerprints = new Set([
+    basketVideoInput.files?.[0],
+    ...pendingBasketVideos,
+    ...basketQueue.map((item) => item.file),
+  ].filter(Boolean).map((file) => `${file.name}:${file.size}:${file.lastModified}`));
+  let duplicateCount = 0;
+  const uniqueFiles = supportedFiles
+    .filter((file) => file.size <= MAX_TIKTOK_VIDEO_SIZE_BYTES)
+    .filter((file) => {
+      const fingerprint = `${file.name}:${file.size}:${file.lastModified}`;
+      if (existingFingerprints.has(fingerprint)) {
+        duplicateCount += 1;
+        return false;
+      }
+      existingFingerprints.add(fingerprint);
+      return true;
+    })
+    .sort((left, right) => left.name.localeCompare(right.name, "th", { numeric: true }));
+  const currentFile = basketVideoInput.files?.[0] || null;
+  const availableSlots = Math.max(
+    0,
+    MAX_BATCH_VIDEOS - pendingBasketVideos.length - (currentFile ? 1 : 0),
+  );
+  const filesToImport = uniqueFiles.slice(0, availableSlots);
+  if (!currentFile && filesToImport.length) {
+    setCurrentBasketVideo(filesToImport.shift(), { announce: false });
+  }
+  pendingBasketVideos.push(...filesToImport);
+  renderPendingBasketVideos();
+
+  const imported = Math.min(uniqueFiles.length, availableSlots);
+  const skipped = Math.max(0, uniqueFiles.length - availableSlots);
+  if (!supportedFiles.length) {
+    basketStatus.textContent = "ไม่พบไฟล์ MP4, MOV หรือ WEBM ที่รองรับ";
+    basketStatus.dataset.state = "error";
+    return;
+  }
+  const messages = [`นำเข้า ${imported} คลิปแล้ว`];
+  if (skipped) messages.push(`ข้าม ${skipped} คลิปเพราะครบ ${MAX_BATCH_VIDEOS} คลิป`);
+  if (oversizedFiles.length) messages.push(`ข้าม ${oversizedFiles.length} คลิปที่เกิน 30 GB`);
+  if (duplicateCount) messages.push(`ข้าม ${duplicateCount} คลิปซ้ำ`);
+  if (imported) messages.push("คลิปแรกพร้อมตั้งค่างาน");
+  basketStatus.textContent = messages.join(" · ");
+  basketStatus.dataset.state = imported ? "success" : "error";
+}
+
+basketVideoInput?.addEventListener("change", () => {
+  setCurrentBasketVideo(basketVideoInput.files?.[0] || null);
 });
+
+chooseMultipleVideosButton?.addEventListener("click", () => multipleVideoInput.click());
+chooseVideoFolderButton?.addEventListener("click", () => videoFolderInput.click());
+multipleVideoInput?.addEventListener("change", () => {
+  importVideoFiles(multipleVideoInput.files || []);
+  multipleVideoInput.value = "";
+});
+videoFolderInput?.addEventListener("change", () => {
+  importVideoFiles(videoFolderInput.files || []);
+  videoFolderInput.value = "";
+});
+clearBasketVideoBatchButton?.addEventListener("click", () => {
+  pendingBasketVideos = [];
+  renderPendingBasketVideos();
+});
+basketVideoBatchDropzone?.addEventListener("click", (event) => {
+  if (!event.target.closest("button")) multipleVideoInput.click();
+});
+basketVideoBatchDropzone?.addEventListener("keydown", (event) => {
+  if (event.target.closest("button")) return;
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    multipleVideoInput.click();
+  }
+});
+for (const eventName of ["dragenter", "dragover"]) {
+  basketVideoBatchDropzone?.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    basketVideoBatchDropzone.classList.add("is-dragging");
+  });
+}
+for (const eventName of ["dragleave", "drop"]) {
+  basketVideoBatchDropzone?.addEventListener(eventName, () => {
+    basketVideoBatchDropzone.classList.remove("is-dragging");
+  });
+}
+basketVideoBatchDropzone?.addEventListener("drop", async (event) => {
+  event.preventDefault();
+  const items = [...(event.dataTransfer.items || [])];
+  const entries = items.map((item) => item.webkitGetAsEntry?.()).filter(Boolean);
+  basketVideoBatchStatus.textContent = "กำลังอ่านวิดีโอจากรายการที่วาง…";
+  basketVideoBatchStatus.dataset.state = "working";
+  const droppedFiles = entries.length
+    ? (await Promise.all(entries.map(collectDroppedEntryFiles))).flat()
+    : [...(event.dataTransfer.files || [])];
+  importVideoFiles(droppedFiles);
+});
+
+renderPendingBasketVideos();
 
 basketCaption?.addEventListener("input", () => {
   basketCaptionCount.textContent = `${basketCaption.value.length} / 4000`;
@@ -517,15 +738,19 @@ addBasketQueueItemButton?.addEventListener("click", () => {
     stateText: "รอดำเนินการ",
   });
   stagedBasketVideo = null;
-  basketVideoInput.value = "";
   basketCaption.value = "";
   basketCaptionCount.textContent = "0 / 4000";
   selectedBasketProduct = null;
-  basketVideoFileName.textContent = "เลือกวิดีโอถัดไป";
-  basketVideoFileMeta.textContent = "คลิกเพื่อเพิ่มคลิปใหม่เข้าคิว";
+  loadNextPendingBasketVideo();
+  if (!basketVideoInput.files?.[0]) {
+    basketVideoFileName.textContent = "เลือกวิดีโอถัดไป";
+    basketVideoFileMeta.textContent = "คลิกเพื่อเพิ่มคลิปใหม่เข้าคิว";
+  }
   updateSelectedProductCard();
   renderSyncedProducts();
-  basketStatus.textContent = `เพิ่มคลิปที่ ${basketQueue.length} ลงคิวแล้ว`;
+  basketStatus.textContent = basketVideoInput.files?.[0]
+    ? `เพิ่มคลิปที่ ${basketQueue.length} ลงคิวแล้ว · โหลดคลิปถัดไปเรียบร้อย`
+    : `เพิ่มคลิปที่ ${basketQueue.length} ลงคิวแล้ว`;
   basketStatus.dataset.state = "success";
   updateBasketBundle();
 });
@@ -781,14 +1006,22 @@ function setProductExpanded(row, expanded) {
   const editor = row.querySelector('[data-role="product-editor"]');
   const toggle = row.querySelector('[data-action="toggle-product"]');
   const toggleLabel = row.querySelector('[data-role="toggle-label"]');
+  if (!editor || !toggle || !toggleLabel) return;
   row.dataset.expanded = String(expanded);
-  editor.hidden = !expanded;
   toggle.setAttribute("aria-expanded", String(expanded));
   toggle.setAttribute(
     "aria-label",
-    expanded ? "ย่อรายละเอียดสินค้า" : "เปิดรายละเอียดสินค้า",
+    expanded ? "ปิดหน้าต่างแก้ไขสินค้า" : "แก้ไขรายละเอียดสินค้า",
   );
-  toggleLabel.textContent = expanded ? "ย่อ" : "แก้ไข";
+  toggleLabel.textContent = "แก้ไข";
+  if (expanded) {
+    for (const openDialog of productList.querySelectorAll(".product-editor-modal[open]")) {
+      if (openDialog !== editor) openDialog.close();
+    }
+    if (!editor.open) editor.showModal();
+  } else if (editor.open) {
+    editor.close();
+  }
 }
 
 function updateJobSummary() {
@@ -805,6 +1038,7 @@ function updateProductRowState(row) {
   const videoPrompt = row.querySelector('[data-role="video-prompt"]');
   const statusBadge = row.querySelector('[data-role="product-status"]');
   const summary = row.querySelector('[data-role="product-summary"]');
+  const modalProgress = row.querySelector('[data-role="modal-progress"]');
   const completedFields = [
     Boolean(imageInput.files[0]),
     Boolean(imagePrompt.value.trim()),
@@ -815,6 +1049,9 @@ function updateProductRowState(row) {
   row.dataset.complete = String(isComplete);
   statusBadge.dataset.state = isComplete ? "complete" : "incomplete";
   statusBadge.textContent = isComplete ? "พร้อม" : `${completedFields} / 3`;
+  modalProgress.textContent = isComplete
+    ? "ข้อมูลครบ พร้อมสร้างคลิป"
+    : `กรอกข้อมูล ${completedFields} / 3 ขั้นตอน`;
   summary.textContent = isComplete
     ? imageInput.files[0].name
     : completedFields > 0
@@ -825,8 +1062,10 @@ function updateProductRowState(row) {
 function updateProductTitles() {
   const rows = [...productList.querySelectorAll(".product-row")];
   rows.forEach((row, index) => {
-    row.querySelector('[data-role="product-title"]').textContent = `สินค้า ${index + 1}`;
+    const displayName = row.dataset.productName || `สินค้า ${index + 1}`;
+    row.querySelector('[data-role="product-title"]').textContent = displayName;
     row.querySelector('[data-role="product-index"]').textContent = index + 1;
+    row.querySelector('[data-role="modal-title"]').textContent = `ตั้งค่า ${displayName}`;
     row.querySelector('[data-action="remove-product"]').setAttribute(
       "aria-label",
       `ลบสินค้า ${index + 1}`,
@@ -849,11 +1088,16 @@ function revokePreview(row) {
 function updateProductPreview(row, file) {
   revokePreview(row);
   const preview = row.querySelector('[data-role="image-preview"]');
+  const cardPreview = row.querySelector('[data-role="card-preview"]');
+  const cardPlaceholder = row.querySelector('[data-role="card-placeholder"]');
   const icon = row.querySelector('[data-role="upload-icon"]');
   const fileName = row.querySelector('[data-role="file-name"]');
   if (!file) {
     preview.hidden = true;
     preview.removeAttribute("src");
+    cardPreview.hidden = true;
+    cardPreview.removeAttribute("src");
+    cardPlaceholder.hidden = false;
     icon.hidden = false;
     fileName.textContent = "เลือกรูปภาพ";
     return;
@@ -862,13 +1106,16 @@ function updateProductPreview(row, file) {
   previewUrls.set(row, url);
   preview.src = url;
   preview.hidden = false;
+  cardPreview.src = url;
+  cardPreview.hidden = false;
+  cardPlaceholder.hidden = true;
   icon.hidden = true;
   fileName.textContent = file.name;
 }
 
-function addProductRow() {
+function addProductRow({ openEditor = true } = {}) {
   if (productList.children.length >= MAX_PRODUCTS) {
-    return;
+    return null;
   }
   const existingRows = [...productList.querySelectorAll(".product-row")];
   existingRows.forEach((existingRow) => {
@@ -894,8 +1141,25 @@ function addProductRow() {
   row
     .querySelector('[data-action="toggle-product"]')
     .addEventListener("click", () => {
-      setProductExpanded(row, row.dataset.expanded !== "true");
+      setProductExpanded(row, true);
     });
+  row.querySelector(".product-row-header").addEventListener("click", (event) => {
+    if (!event.target.closest("button")) setProductExpanded(row, true);
+  });
+  row.querySelector('[data-action="close-product"]').addEventListener("click", () => {
+    setProductExpanded(row, false);
+  });
+  row.querySelector('[data-action="save-product"]').addEventListener("click", () => {
+    setProductExpanded(row, false);
+  });
+  const editor = row.querySelector('[data-role="product-editor"]');
+  editor.addEventListener("close", () => {
+    row.dataset.expanded = "false";
+    row.querySelector('[data-action="toggle-product"]').setAttribute("aria-expanded", "false");
+  });
+  editor.addEventListener("click", (event) => {
+    if (event.target === editor) setProductExpanded(row, false);
+  });
   row
     .querySelector('[data-action="remove-product"]')
     .addEventListener("click", () => {
@@ -905,28 +1169,160 @@ function addProductRow() {
       revokePreview(row);
       row.remove();
       updateProductTitles();
-      const remainingRows = [...productList.querySelectorAll(".product-row")];
-      if (remainingRows.length && !remainingRows.some((item) => item.dataset.expanded === "true")) {
-        setProductExpanded(remainingRows[0], true);
-      }
     });
   productList.append(row);
-  setProductExpanded(row, true);
   updateProductTitles();
+  if (openEditor) setProductExpanded(row, true);
   if (existingRows.length) {
     requestAnimationFrame(() => {
       row.scrollIntoView({ behavior: "smooth", block: "nearest" });
     });
   }
+  return row;
 }
 
-addProductButton.addEventListener("click", addProductRow);
+addProductButton.addEventListener("click", () => addProductRow());
 loopCount.addEventListener("change", updateJobSummary);
-addProductRow();
+addProductRow({ openEditor: false });
+
+function isSupportedImage(file) {
+  return Boolean(file) && (
+    ["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
+    /\.(?:jpe?g|png|webp)$/i.test(file.name)
+  );
+}
+
+function rowHasProductData(row) {
+  return Boolean(
+    row.querySelector('[data-role="image-input"]').files[0] ||
+    row.querySelector('[data-role="image-prompt"]').value.trim() ||
+    row.querySelector('[data-role="video-prompt"]').value.trim()
+  );
+}
+
+function assignImageToProductRow(row, file) {
+  const imageInput = row.querySelector('[data-role="image-input"]');
+  const transfer = new DataTransfer();
+  transfer.items.add(file);
+  imageInput.files = transfer.files;
+  row.dataset.productName = file.name.replace(/\.[^.]+$/, "") || file.name;
+  updateProductPreview(row, file);
+  updateProductRowState(row);
+}
+
+function importImageFiles(files) {
+  const supportedFiles = [...files]
+    .filter(isSupportedImage)
+    .sort((left, right) => left.name.localeCompare(right.name, "th", { numeric: true }));
+  const oversizedFiles = supportedFiles.filter((file) => file.size > MAX_IMAGE_SIZE_BYTES);
+  const usableFiles = supportedFiles.filter((file) => file.size <= MAX_IMAGE_SIZE_BYTES);
+  const availableSlots = MAX_PRODUCTS - [...productList.querySelectorAll(".product-row")]
+    .filter(rowHasProductData).length;
+  const filesToImport = usableFiles.slice(0, Math.max(0, availableSlots));
+  let imported = 0;
+
+  for (const file of filesToImport) {
+    let targetRow = [...productList.querySelectorAll(".product-row")]
+      .find((row) => !rowHasProductData(row));
+    if (!targetRow) targetRow = addProductRow({ openEditor: false });
+    if (!targetRow) break;
+    assignImageToProductRow(targetRow, file);
+    imported += 1;
+  }
+
+  updateProductTitles();
+  const skippedForLimit = Math.max(0, usableFiles.length - imported);
+  const messages = [`เพิ่ม ${imported} รูปเป็น ${imported} สินค้าแล้ว`];
+  if (oversizedFiles.length) messages.push(`ข้าม ${oversizedFiles.length} รูปที่เกิน 20 MB`);
+  if (skippedForLimit) messages.push(`ข้าม ${skippedForLimit} รูปเพราะครบ ${MAX_PRODUCTS} สินค้า`);
+  if (!supportedFiles.length) messages[0] = "ไม่พบไฟล์ JPG, PNG หรือ WEBP ที่รองรับ";
+  imageBatchStatus.textContent = messages.join(" · ");
+  imageBatchStatus.dataset.state = imported ? "success" : "error";
+  if (imported) {
+    productList.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+}
+
+function readDirectoryEntry(entry) {
+  return new Promise((resolve) => {
+    const reader = entry.createReader();
+    const entries = [];
+    const readBatch = () => {
+      reader.readEntries((batch) => {
+        if (!batch.length) {
+          resolve(entries);
+          return;
+        }
+        entries.push(...batch);
+        readBatch();
+      }, () => resolve(entries));
+    };
+    readBatch();
+  });
+}
+
+function readFileEntry(entry) {
+  return new Promise((resolve) => entry.file(resolve, () => resolve(null)));
+}
+
+async function collectDroppedEntryFiles(entry) {
+  if (!entry) return [];
+  if (entry.isFile) {
+    const file = await readFileEntry(entry);
+    return file ? [file] : [];
+  }
+  if (!entry.isDirectory) return [];
+  const children = await readDirectoryEntry(entry);
+  const nestedFiles = await Promise.all(children.map(collectDroppedEntryFiles));
+  return nestedFiles.flat();
+}
+
+chooseMultipleImagesButton?.addEventListener("click", () => multipleImageInput.click());
+chooseImageFolderButton?.addEventListener("click", () => imageFolderInput.click());
+multipleImageInput?.addEventListener("change", () => {
+  importImageFiles(multipleImageInput.files || []);
+  multipleImageInput.value = "";
+});
+imageFolderInput?.addEventListener("change", () => {
+  importImageFiles(imageFolderInput.files || []);
+  imageFolderInput.value = "";
+});
+imageBatchDropzone?.addEventListener("click", (event) => {
+  if (!event.target.closest("button")) multipleImageInput.click();
+});
+imageBatchDropzone?.addEventListener("keydown", (event) => {
+  if (event.target.closest("button")) return;
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    multipleImageInput.click();
+  }
+});
+for (const eventName of ["dragenter", "dragover"]) {
+  imageBatchDropzone?.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    imageBatchDropzone.classList.add("is-dragging");
+  });
+}
+for (const eventName of ["dragleave", "drop"]) {
+  imageBatchDropzone?.addEventListener(eventName, () => {
+    imageBatchDropzone.classList.remove("is-dragging");
+  });
+}
+imageBatchDropzone?.addEventListener("drop", async (event) => {
+  event.preventDefault();
+  const items = [...(event.dataTransfer.items || [])];
+  const entries = items.map((item) => item.webkitGetAsEntry?.()).filter(Boolean);
+  imageBatchStatus.textContent = "กำลังอ่านรูปจากรายการที่วาง…";
+  imageBatchStatus.dataset.state = "working";
+  const droppedFiles = entries.length
+    ? (await Promise.all(entries.map(collectDroppedEntryFiles))).flat()
+    : [...(event.dataTransfer.files || [])];
+  importImageFiles(droppedFiles);
+});
 
 function focusProductField(row, field) {
   setProductExpanded(row, true);
-  row.scrollIntoView({ behavior: "smooth", block: "center" });
   setTimeout(() => field.focus(), 180);
 }
 

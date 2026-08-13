@@ -68,12 +68,22 @@
             </button>
           </div>
 
+          <div id="imageBatchDropzone" class="image-batch-dropzone" tabindex="0" role="button" aria-label="นำเข้ารูปสินค้าหลายภาพ">
+            <span class="image-batch-icon" aria-hidden="true">⇧</span>
+            <span class="image-batch-copy">
+              <strong>ลากรูปหรือโฟลเดอร์มาวาง</strong>
+              <small>1 รูปจะสร้างสินค้า 1 รายการ · JPG, PNG, WEBP</small>
+            </span>
+            <span class="image-batch-actions">
+              <button id="chooseMultipleImages" type="button">เลือกรูป</button>
+              <button id="chooseImageFolder" type="button">เลือกโฟลเดอร์</button>
+            </span>
+          </div>
+          <input id="multipleImageInput" type="file" accept="image/png,image/jpeg,image/webp" multiple />
+          <input id="imageFolderInput" type="file" accept="image/png,image/jpeg,image/webp" webkitdirectory multiple />
+          <div id="imageBatchStatus" class="image-batch-status" role="status" aria-live="polite"></div>
+
           <div class="product-table" aria-label="ตารางรายการสินค้า">
-            <div class="product-table-head" aria-hidden="true">
-              <span>สินค้า</span>
-              <span>สถานะ</span>
-              <span>จัดการ</span>
-            </div>
             <div id="productList" class="product-list"></div>
           </div>
 
@@ -97,8 +107,12 @@
       </section>
 
       <template id="productTemplate">
-        <article class="product-row" data-expanded="true">
+        <article class="product-row" data-expanded="false">
           <header class="product-row-header">
+            <span class="product-card-preview" aria-hidden="true">
+              <img data-role="card-preview" alt="" hidden />
+              <span data-role="card-placeholder">＋</span>
+            </span>
             <span class="product-identity">
               <span class="product-index" data-role="product-index">1</span>
               <span class="product-name">
@@ -112,11 +126,10 @@
                 data-action="toggle-product"
                 class="toggle-product"
                 type="button"
-                aria-expanded="true"
-                aria-label="ย่อรายละเอียดสินค้า"
+                aria-expanded="false"
+                aria-label="แก้ไขรายละเอียดสินค้า"
               >
-                <span data-role="toggle-label">ย่อ</span>
-                <span class="toggle-caret" aria-hidden="true">⌃</span>
+                <span data-role="toggle-label">แก้ไข</span>
               </button>
               <button
                 data-action="remove-product"
@@ -126,31 +139,46 @@
               >×</button>
             </span>
           </header>
-          <div class="product-editor" data-role="product-editor">
-            <label class="field upload-field">
-              <span class="field-heading">
-                <span class="step-number">01</span>
-                <span><strong>รูปภาพอ้างอิง</strong><small>PNG, JPG หรือ WEBP · ไม่เกิน 20 MB</small></span>
-              </span>
-              <span class="file-picker">
-                <span class="preview-shell">
-                  <img data-role="image-preview" alt="ตัวอย่างรูปสินค้า" hidden />
-                  <span data-role="upload-icon" class="upload-icon" aria-hidden="true">＋</span>
+          <dialog class="product-editor-modal" data-role="product-editor" aria-modal="true">
+            <div class="product-editor-modal-shell">
+              <header class="product-editor-modal-header">
+                <span>
+                  <small>PRODUCT SETUP</small>
+                  <strong data-role="modal-title">ตั้งค่าสินค้า 1</strong>
                 </span>
-                <span class="file-copy"><strong data-role="file-name">เลือกรูปภาพ</strong><small>คลิกเพื่อเลือกไฟล์จากเครื่อง</small></span>
-                <span class="picker-arrow" aria-hidden="true">›</span>
-              </span>
-              <input data-role="image-input" type="file" accept="image/png,image/jpeg,image/webp" />
-            </label>
-            <label class="field">
-              <span class="field-heading"><span class="step-number">02</span><span><strong>Image Prompt</strong><small>อธิบายภาพของสินค้านี้</small></span></span>
-              <span class="input-shell"><textarea data-role="image-prompt" rows="3" placeholder="อธิบายภาพที่ต้องการสร้าง…"></textarea><span class="input-tag">9:16 · NANO BANANA 2</span></span>
-            </label>
-            <label class="field">
-              <span class="field-heading"><span class="step-number">03</span><span><strong>Video Prompt</strong><small>กำหนดการเคลื่อนไหวของสินค้านี้</small></span></span>
-              <span class="input-shell"><textarea data-role="video-prompt" rows="3" placeholder="อธิบายการเคลื่อนไหวและมุมกล้อง…"></textarea><span class="input-tag">VEO 3.1 LITE · 8S</span></span>
-            </label>
-          </div>
+                <button data-action="close-product" type="button" aria-label="ปิดหน้าต่าง">×</button>
+              </header>
+              <div class="product-editor-modal-body">
+                <label class="field upload-field">
+                  <span class="field-heading">
+                    <span class="step-number">01</span>
+                    <span><strong>รูปภาพอ้างอิง</strong><small>PNG, JPG หรือ WEBP · ไม่เกิน 20 MB</small></span>
+                  </span>
+                  <span class="file-picker">
+                    <span class="preview-shell">
+                      <img data-role="image-preview" alt="ตัวอย่างรูปสินค้า" hidden />
+                      <span data-role="upload-icon" class="upload-icon" aria-hidden="true">＋</span>
+                    </span>
+                    <span class="file-copy"><strong data-role="file-name">เลือกรูปภาพ</strong><small>คลิกเพื่อเลือกไฟล์จากเครื่อง</small></span>
+                    <span class="picker-arrow" aria-hidden="true">›</span>
+                  </span>
+                  <input data-role="image-input" type="file" accept="image/png,image/jpeg,image/webp" />
+                </label>
+                <label class="field">
+                  <span class="field-heading"><span class="step-number">02</span><span><strong>Image Prompt</strong><small>อธิบายภาพของสินค้านี้</small></span></span>
+                  <span class="input-shell"><textarea data-role="image-prompt" rows="4" placeholder="อธิบายภาพที่ต้องการสร้าง…"></textarea><span class="input-tag">9:16 · NANO BANANA 2</span></span>
+                </label>
+                <label class="field">
+                  <span class="field-heading"><span class="step-number">03</span><span><strong>Video Prompt</strong><small>กำหนดการเคลื่อนไหวของสินค้านี้</small></span></span>
+                  <span class="input-shell"><textarea data-role="video-prompt" rows="4" placeholder="อธิบายการเคลื่อนไหวและมุมกล้อง…"></textarea><span class="input-tag">VEO 3.1 LITE · 8S</span></span>
+                </label>
+              </div>
+              <footer class="product-editor-modal-footer">
+                <span data-role="modal-progress">กรอกข้อมูล 0 / 3 ขั้นตอน</span>
+                <button data-action="save-product" class="primary-button" type="button">เสร็จสิ้น</button>
+              </footer>
+            </div>
+          </dialog>
         </article>
       </template>
 
@@ -302,6 +330,39 @@
         </section>
 
         <div class="basket-form-card">
+          <section class="basket-video-batch-section" aria-labelledby="basketVideoBatchTitle">
+            <div id="basketVideoBatchDropzone" class="image-batch-dropzone basket-video-batch-dropzone" tabindex="0" role="button" aria-label="นำเข้าวิดีโอหลายคลิป">
+              <span class="image-batch-icon basket-video-batch-icon" aria-hidden="true">▶</span>
+              <span class="image-batch-copy">
+                <strong id="basketVideoBatchTitle">ลากวิดีโอหรือโฟลเดอร์มาวาง</strong>
+                <small>นำเข้า MP4, MOV, WEBM สูงสุด 30 คลิป</small>
+              </span>
+              <span class="image-batch-actions">
+                <button id="chooseMultipleVideos" type="button">เลือกวิดีโอ</button>
+                <button id="chooseVideoFolder" type="button">เลือกโฟลเดอร์</button>
+              </span>
+            </div>
+            <input id="multipleVideoInput" type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" multiple />
+            <input id="videoFolderInput" type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" webkitdirectory multiple />
+            <div class="basket-video-batch-meta">
+              <span id="basketVideoBatchStatus" role="status" aria-live="polite">ยังไม่มีคลิปรอทำงาน</span>
+              <button id="clearBasketVideoBatch" type="button" hidden>ล้างคลิปรอ</button>
+            </div>
+            <div id="basketVideoBatchList" class="basket-video-batch-list" aria-live="polite"></div>
+          </section>
+
+          <section id="basketVideoPreviewCard" class="basket-video-preview-card" aria-labelledby="basketVideoPreviewTitle" hidden>
+            <div class="basket-video-preview-heading">
+              <span>
+                <small>คลิปปัจจุบัน</small>
+                <strong id="basketVideoPreviewTitle">ตรวจคลิปก่อนเขียนแฮชแท็ก</strong>
+              </span>
+              <span id="basketVideoPreviewDuration" class="basket-video-preview-duration">--:--</span>
+            </div>
+            <video id="basketVideoPreview" controls muted playsinline preload="metadata"></video>
+            <p id="basketVideoPreviewName" class="basket-video-preview-name"></p>
+          </section>
+
           <label class="field upload-field basket-video-field">
             <span class="field-heading">
               <span class="step-number">01</span>
