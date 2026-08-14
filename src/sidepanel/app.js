@@ -47,6 +47,11 @@ const basketVideoPreviewCard = document.querySelector("#basketVideoPreviewCard")
 const basketVideoPreview = document.querySelector("#basketVideoPreview");
 const basketVideoPreviewName = document.querySelector("#basketVideoPreviewName");
 const basketVideoPreviewDuration = document.querySelector("#basketVideoPreviewDuration");
+const downloadBasketCsvTemplateButton = document.querySelector("#downloadBasketCsvTemplate");
+const importBasketCsvButton = document.querySelector("#importBasketCsv");
+const basketCsvInput = document.querySelector("#basketCsvInput");
+const basketCsvStatus = document.querySelector("#basketCsvStatus");
+const clearBasketCsvButton = document.querySelector("#clearBasketCsv");
 const basketCaption = document.querySelector("#basketCaption");
 const basketCaptionCount = document.querySelector("#basketCaptionCount");
 const basketStatus = document.querySelector("#basketStatus");
@@ -81,6 +86,7 @@ const MAX_TIKTOK_VIDEO_SIZE_BYTES = 30 * 1024 * 1024 * 1024;
 let stagedBasketVideo = null;
 let pendingBasketVideos = [];
 let basketVideoPreviewUrl = "";
+let basketCsvMetadata = new Map();
 let syncedProducts = [];
 let selectedBasketProduct = null;
 let basketFlowRunning = false;
@@ -502,6 +508,219 @@ function isSupportedVideo(file) {
   );
 }
 
+function normalizeBasketVideoFileName(fileName) {
+  return String(fileName || "")
+    .trim()
+    .replace(/^.*[\\/]/, "")
+    .normalize("NFC")
+    .toLocaleLowerCase("en-US");
+}
+
+function getBasketSourceVideos() {
+  const files = [
+    ...basketQueue.map((item) => item.file),
+    basketVideoInput?.files?.[0],
+    ...pendingBasketVideos,
+  ].filter(Boolean);
+  const seen = new Set();
+  return files.filter((file) => {
+    const fingerprint = `${normalizeBasketVideoFileName(file.name)}:${file.size}:${file.lastModified}`;
+    if (seen.has(fingerprint)) return false;
+    seen.add(fingerprint);
+    return true;
+  });
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function parseCsvRows(text) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let quoted = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (quoted) {
+      if (character === '"' && text[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else if (character === '"') {
+        quoted = false;
+      } else {
+        cell += character;
+      }
+      continue;
+    }
+    if (character === '"') {
+      quoted = true;
+    } else if (character === ",") {
+      row.push(cell);
+      cell = "";
+    } else if (character === "\n") {
+      row.push(cell.replace(/\r$/, ""));
+      if (row.some((value) => value.trim())) rows.push(row);
+      row = [];
+      cell = "";
+    } else {
+      cell += character;
+    }
+  }
+  row.push(cell.replace(/\r$/, ""));
+  if (row.some((value) => value.trim())) rows.push(row);
+  return rows;
+}
+
+function normalizeCsvHeader(header) {
+  return String(header || "")
+    .replace(/^\uFEFF/, "")
+    .trim()
+    .toLocaleLowerCase("en-US")
+    .replace(/[\s-]+/g, "_");
+}
+
+function findCsvColumn(headers, aliases) {
+  return headers.findIndex((header) => aliases.includes(header));
+}
+
+function parseBasketCsv(text) {
+  const rows = parseCsvRows(text);
+  if (rows.length < 2) throw new Error("CSV ไม่มีข้อมูลคลิป");
+  const headers = rows.shift().map(normalizeCsvHeader);
+  const fileIndex = findCsvColumn(headers, ["video_file", "file_name", "filename", "video", "ชื่อไฟล์", "ไฟล์วิดีโอ"]);
+  const captionIndex = findCsvColumn(headers, ["caption", "description", "ข้อความ", "คำอธิบาย"]);
+  const hashtagsIndex = findCsvColumn(headers, ["hashtags", "hashtag", "แฮชแท็ก"]);
+  const productIdIndex = findCsvColumn(headers, ["product_id", "productid", "รหัสสินค้า"]);
+  if (fileIndex < 0) throw new Error('ไม่พบคอลัมน์ "video_file"');
+
+  return rows.map((values, index) => ({
+    rowNumber: index + 2,
+    fileName: values[fileIndex]?.trim() || "",
+    caption: captionIndex >= 0 ? values[captionIndex]?.trim() || "" : "",
+    hashtags: hashtagsIndex >= 0 ? values[hashtagsIndex]?.trim() || "" : "",
+    productId: productIdIndex >= 0 ? values[productIdIndex]?.trim() || "" : "",
+  })).filter((entry) => entry.fileName);
+}
+
+async function readCsvText(file) {
+  const bytes = await file.arrayBuffer();
+  const utf8Text = new TextDecoder("utf-8").decode(bytes);
+  if (!utf8Text.includes("\uFFFD")) return utf8Text;
+  try {
+    return new TextDecoder("windows-874").decode(bytes);
+  } catch {
+    return utf8Text;
+  }
+}
+
+function joinBasketCaption(caption, hashtags) {
+  return [caption.trim(), hashtags.trim()].filter(Boolean).join("\n\n").slice(0, 4000);
+}
+
+function getCsvMetadataForVideo(file) {
+  return basketCsvMetadata.get(normalizeBasketVideoFileName(file?.name)) || null;
+}
+
+function setBasketCaptionValue(value) {
+  basketCaption.value = value;
+  basketCaptionCount.textContent = `${basketCaption.value.length} / 4000`;
+}
+
+function applyCsvMetadataToCurrentVideo(file, { announce = true } = {}) {
+  const metadata = getCsvMetadataForVideo(file);
+  if (!metadata) return false;
+
+  setBasketCaptionValue(joinBasketCaption(metadata.caption, metadata.hashtags));
+  let productMatched = false;
+  if (metadata.productId) {
+    const product = syncedProducts.find((item) => String(item.id) === metadata.productId) || null;
+    selectedBasketProduct = product;
+    updateSelectedProductCard();
+    renderSyncedProducts();
+    productMatched = Boolean(product);
+  }
+
+  if (announce) {
+    const productMessage = metadata.productId
+      ? productMatched
+        ? ` · เลือก Product ID ${metadata.productId} แล้ว`
+        : ` · ยังไม่พบ Product ID ${metadata.productId} ใน TikTok Sync`
+      : "";
+    basketStatus.textContent = `เติมข้อมูล CSV ให้ ${file.name} แล้ว${productMessage}`;
+    basketStatus.dataset.state = metadata.productId && !productMatched ? "error" : "success";
+  }
+  updateBasketBundle();
+  return true;
+}
+
+function updateBasketCsvStatus() {
+  const files = getBasketSourceVideos();
+  const matchedCount = files.filter((file) => getCsvMetadataForVideo(file)).length;
+  basketCsvStatus.textContent = basketCsvMetadata.size
+    ? `CSV ${basketCsvMetadata.size} แถว · จับคู่คลิปแล้ว ${matchedCount}/${files.length}`
+    : "ยังไม่ได้นำเข้า CSV";
+  basketCsvStatus.dataset.state = basketCsvMetadata.size ? (matchedCount ? "ready" : "warning") : "empty";
+  clearBasketCsvButton.hidden = !basketCsvMetadata.size;
+}
+
+function downloadBasketCsvTemplate() {
+  const files = getBasketSourceVideos();
+  if (!files.length) {
+    basketStatus.textContent = "กรุณานำเข้าวิดีโอก่อนดาวน์โหลด CSV Template";
+    basketStatus.dataset.state = "error";
+    return;
+  }
+  const lines = ["video_file,caption,hashtags,product_id"];
+  for (const file of files) {
+    const metadata = getCsvMetadataForVideo(file) || {};
+    lines.push([
+      file.name,
+      metadata.caption || "",
+      metadata.hashtags || "",
+      metadata.productId || "",
+    ].map(csvCell).join(","));
+  }
+  const blob = new Blob(["\uFEFF", lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `flow-tiktok-template-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  basketStatus.textContent = `ดาวน์โหลด CSV Template สำหรับ ${files.length} คลิปแล้ว`;
+  basketStatus.dataset.state = "success";
+}
+
+async function importBasketCsvFile(file) {
+  if (!file) return;
+  if (file.size > 2 * 1024 * 1024) throw new Error("ไฟล์ CSV ต้องมีขนาดไม่เกิน 2 MB");
+  const entries = parseBasketCsv(await readCsvText(file));
+  const nextMetadata = new Map();
+  let duplicateCount = 0;
+  for (const entry of entries) {
+    const key = normalizeBasketVideoFileName(entry.fileName);
+    if (nextMetadata.has(key)) duplicateCount += 1;
+    nextMetadata.set(key, entry);
+  }
+  basketCsvMetadata = nextMetadata;
+  renderPendingBasketVideos();
+  updateBasketCsvStatus();
+  const currentFile = basketVideoInput?.files?.[0] || null;
+  if (currentFile) applyCsvMetadataToCurrentVideo(currentFile, { announce: false });
+
+  const files = getBasketSourceVideos();
+  const matchedCount = files.filter((video) => getCsvMetadataForVideo(video)).length;
+  const missingCount = Math.max(0, files.length - matchedCount);
+  const messages = [`นำเข้า CSV ${entries.length} แถว`, `จับคู่ ${matchedCount}/${files.length} คลิป`];
+  if (missingCount) messages.push(`ไม่พบข้อมูล ${missingCount} คลิป`);
+  if (duplicateCount) messages.push(`พบชื่อซ้ำ ${duplicateCount} แถวและใช้แถวล่าสุด`);
+  basketStatus.textContent = messages.join(" · ");
+  basketStatus.dataset.state = matchedCount ? (missingCount ? "ready" : "success") : "error";
+}
+
 function formatVideoDuration(totalSeconds) {
   if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "--:--";
   const roundedSeconds = Math.floor(totalSeconds);
@@ -556,6 +775,7 @@ function setCurrentBasketVideo(file, { announce = true } = {}) {
     basketStatus.textContent = "เลือกวิดีโอแล้ว กรุณาใส่ข้อความและเลือกสินค้าที่จะผูก";
     basketStatus.dataset.state = "ready";
   }
+  applyCsvMetadataToCurrentVideo(file, { announce: Boolean(announce && getCsvMetadataForVideo(file)) });
   updateBasketBundle();
 }
 
@@ -574,7 +794,9 @@ function renderPendingBasketVideos() {
     const name = document.createElement("strong");
     name.textContent = file.name;
     const meta = document.createElement("small");
-    meta.textContent = formatFileSize(file.size);
+    meta.textContent = getCsvMetadataForVideo(file)
+      ? `${formatFileSize(file.size)} · CSV พร้อม`
+      : formatFileSize(file.size);
     copy.append(name, meta);
 
     const remove = document.createElement("button");
@@ -594,6 +816,7 @@ function renderPendingBasketVideos() {
     : "ยังไม่มีคลิปรอทำงาน";
   basketVideoBatchStatus.dataset.state = pendingBasketVideos.length ? "ready" : "empty";
   clearBasketVideoBatchButton.hidden = !pendingBasketVideos.length;
+  updateBasketCsvStatus();
 }
 
 function loadNextPendingBasketVideo() {
@@ -662,6 +885,30 @@ basketVideoInput?.addEventListener("change", () => {
 
 chooseMultipleVideosButton?.addEventListener("click", () => multipleVideoInput.click());
 chooseVideoFolderButton?.addEventListener("click", () => videoFolderInput.click());
+downloadBasketCsvTemplateButton?.addEventListener("click", downloadBasketCsvTemplate);
+importBasketCsvButton?.addEventListener("click", () => basketCsvInput.click());
+basketCsvInput?.addEventListener("change", async () => {
+  const file = basketCsvInput.files?.[0] || null;
+  basketCsvInput.value = "";
+  if (!file) return;
+  basketCsvStatus.textContent = "กำลังอ่านและจับคู่ CSV…";
+  basketCsvStatus.dataset.state = "working";
+  try {
+    await importBasketCsvFile(file);
+  } catch (error) {
+    basketCsvStatus.textContent = `นำเข้า CSV ไม่สำเร็จ: ${String(error)}`;
+    basketCsvStatus.dataset.state = "error";
+    basketStatus.textContent = `นำเข้า CSV ไม่สำเร็จ: ${String(error)}`;
+    basketStatus.dataset.state = "error";
+  }
+});
+clearBasketCsvButton?.addEventListener("click", () => {
+  basketCsvMetadata = new Map();
+  renderPendingBasketVideos();
+  updateBasketCsvStatus();
+  basketStatus.textContent = "ล้างข้อมูล CSV แล้ว ข้อมูลที่เติมในชุดงานปัจจุบันยังคงอยู่และแก้ไขต่อได้";
+  basketStatus.dataset.state = "ready";
+});
 multipleVideoInput?.addEventListener("change", () => {
   importVideoFiles(multipleVideoInput.files || []);
   multipleVideoInput.value = "";

@@ -351,6 +351,30 @@
             <div id="basketVideoBatchList" class="basket-video-batch-list" aria-live="polite"></div>
           </section>
 
+          <section class="basket-csv-card" aria-labelledby="basketCsvTitle">
+            <div class="basket-csv-heading">
+              <span class="basket-csv-icon" aria-hidden="true">CSV</span>
+              <span>
+                <strong id="basketCsvTitle">เติมข้อมูลคลิปด้วย CSV</strong>
+                <small>ระบบจับคู่จากชื่อไฟล์ แล้วเติมข้อความ แฮชแท็ก และ Product ID</small>
+              </span>
+            </div>
+            <ol class="basket-csv-steps">
+              <li>นำเข้าคลิปหรือโฟลเดอร์</li>
+              <li>ดาวน์โหลด Template แล้วกรอกข้อมูล</li>
+              <li>นำ CSV กลับเข้ามาเพื่อตรวจสอบ</li>
+            </ol>
+            <div class="basket-csv-actions">
+              <button id="downloadBasketCsvTemplate" type="button">ดาวน์โหลด CSV Template</button>
+              <button id="importBasketCsv" class="is-primary" type="button">นำเข้า CSV</button>
+            </div>
+            <input id="basketCsvInput" type="file" accept="text/csv,.csv" />
+            <div class="basket-csv-status-row">
+              <span id="basketCsvStatus" data-state="empty" role="status" aria-live="polite">ยังไม่ได้นำเข้า CSV</span>
+              <button id="clearBasketCsv" type="button" hidden>ล้าง CSV</button>
+            </div>
+          </section>
+
           <section id="basketVideoPreviewCard" class="basket-video-preview-card" aria-labelledby="basketVideoPreviewTitle" hidden>
             <div class="basket-video-preview-heading">
               <span>
