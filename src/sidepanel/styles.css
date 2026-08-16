@@ -116,7 +116,8 @@ select {
 .product-search-field[hidden],
 .synced-product-list[hidden],
 .selected-product-card[hidden],
-.basket-schedule-field[hidden] {
+.basket-schedule-field[hidden],
+.basket-daily-schedule[hidden] {
   display: none !important;
 }
 
@@ -607,6 +608,10 @@ select {
   gap: 8px;
 }
 
+.post-time-option-wide {
+  grid-column: 1 / -1;
+}
+
 .post-time-option {
   position: relative;
   display: grid;
@@ -733,6 +738,203 @@ select {
 
 .queue-interval-input small {
   color: var(--muted, #9ca3af);
+}
+
+.basket-daily-schedule {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(122, 131, 255, 0.22);
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(75, 84, 255, 0.07), rgba(13, 14, 19, 0.94));
+}
+
+.basket-daily-heading,
+.basket-daily-status {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.basket-daily-heading > span:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.basket-daily-heading strong {
+  color: #eef0f5;
+  font-size: 12px;
+}
+
+.basket-daily-heading small {
+  color: #7f8491;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.basket-daily-count {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid rgba(122, 131, 255, 0.24);
+  border-radius: 999px;
+  color: #bbc0ff;
+  background: rgba(89, 101, 255, 0.1);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.basket-daily-plan-list {
+  display: grid;
+  gap: 8px;
+}
+
+.basket-daily-plan-row {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.022);
+}
+
+.basket-daily-plan-row[data-state="error"] {
+  border-color: rgba(255, 107, 117, 0.34);
+  background: rgba(115, 30, 39, 0.07);
+}
+
+.basket-daily-plan-heading {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.basket-daily-plan-heading > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.basket-daily-plan-heading small {
+  color: #858bff;
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: 0.8px;
+}
+
+.basket-daily-plan-heading strong {
+  overflow: hidden;
+  color: #dfe2e9;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.basket-daily-remove {
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255, 107, 117, 0.18);
+  border-radius: 8px;
+  color: #ff9da6;
+  background: rgba(115, 30, 39, 0.1);
+  font-size: 15px;
+}
+
+.basket-daily-remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.3;
+}
+
+.basket-daily-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.basket-daily-plan-grid label {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.basket-daily-plan-grid label > span {
+  color: #8f94a1;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.basket-daily-plan-grid input {
+  width: 100%;
+  min-width: 0;
+  min-height: 39px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: #eceef3;
+  background: #0c0d11;
+  color-scheme: dark;
+  font: inherit;
+  font-size: 12px;
+}
+
+.basket-daily-plan-grid input:focus {
+  border-color: rgba(119, 128, 255, 0.72);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(82, 91, 255, 0.1);
+}
+
+.basket-daily-plan-result {
+  padding: 7px 8px;
+  border-radius: 8px;
+  color: #aeb3bd;
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.basket-daily-plan-result[data-state="error"] {
+  color: #ff9da6;
+  background: rgba(115, 30, 39, 0.1);
+}
+
+.basket-daily-add {
+  min-height: 38px;
+  border: 1px dashed rgba(122, 131, 255, 0.34);
+  border-radius: 10px;
+  color: #b9bdff;
+  background: rgba(89, 101, 255, 0.055);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.basket-daily-status {
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 9px;
+  color: #8f94a1;
+  background: rgba(255, 255, 255, 0.018);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.basket-daily-status[data-state="success"] {
+  color: #7be0aa;
+  border-color: rgba(104, 211, 145, 0.2);
+  background: rgba(72, 187, 120, 0.07);
+}
+
+.basket-daily-status[data-state="warning"] {
+  color: #f0c879;
+  border-color: rgba(240, 200, 121, 0.2);
+}
+
+.basket-daily-status[data-state="error"] {
+  color: #ff9da6;
+  border-color: rgba(255, 107, 117, 0.22);
+  background: rgba(115, 30, 39, 0.07);
 }
 
 .basket-queue-card {

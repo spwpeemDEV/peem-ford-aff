@@ -475,7 +475,12 @@
               <label class="post-time-option">
                 <input type="radio" name="basketPublishMode" value="schedule" />
                 <span aria-hidden="true">◷</span>
-                <span><strong>ตั้งเวลาโพสต์</strong><small>กำหนดวันและเวลาล่วงหน้า</small></span>
+                <span><strong>เว้นต่อเนื่อง</strong><small>เริ่มครั้งเดียวแล้วเว้นเท่ากันทุกคลิป</small></span>
+              </label>
+              <label class="post-time-option post-time-option-wide">
+                <input type="radio" name="basketPublishMode" value="daily" />
+                <span aria-hidden="true">▦</span>
+                <span><strong>วางแผนรายวัน</strong><small>แต่ละวันกำหนดจำนวนคลิปและเวลาได้อิสระ</small></span>
               </label>
             </div>
 
@@ -491,6 +496,24 @@
                   <small>นาที</small>
                 </span>
               </label>
+            </div>
+
+            <div id="basketDailyScheduleField" class="basket-daily-schedule" hidden>
+              <div class="basket-daily-heading">
+                <span>
+                  <strong>แผนโพสต์รายวัน</strong>
+                  <small>ระบบเรียงคลิปในคิวลงแต่ละวันจากบนลงล่าง</small>
+                </span>
+                <span id="basketDailyAllocatedCount" class="basket-daily-count">0 ช่อง</span>
+              </div>
+              <div id="basketDailyPlanList" class="basket-daily-plan-list"></div>
+              <button id="addBasketDailyPlan" class="basket-daily-add" type="button">
+                <span aria-hidden="true">＋</span>
+                เพิ่มวันโพสต์
+              </button>
+              <div id="basketDailyPlanStatus" class="basket-daily-status" data-state="empty" role="status" aria-live="polite">
+                เพิ่มแผนรายวันเพื่อจัดเวลาคลิป
+              </div>
             </div>
 
             <button id="addBasketQueueItem" class="queue-add-button post-time-queue-button" type="button" disabled>

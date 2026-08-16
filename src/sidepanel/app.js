@@ -66,6 +66,11 @@ const basketPublishModeInputs = [...document.querySelectorAll('input[name="baske
 const basketScheduleField = document.querySelector("#basketScheduleField");
 const basketScheduleAt = document.querySelector("#basketScheduleAt");
 const basketIntervalMinutes = document.querySelector("#basketIntervalMinutes");
+const basketDailyScheduleField = document.querySelector("#basketDailyScheduleField");
+const basketDailyPlanList = document.querySelector("#basketDailyPlanList");
+const basketDailyAllocatedCount = document.querySelector("#basketDailyAllocatedCount");
+const basketDailyPlanStatus = document.querySelector("#basketDailyPlanStatus");
+const addBasketDailyPlanButton = document.querySelector("#addBasketDailyPlan");
 const addBasketQueueItemButton = document.querySelector("#addBasketQueueItem");
 const startBasketQueueButton = document.querySelector("#startBasketQueue");
 const basketQueueList = document.querySelector("#basketQueueList");
@@ -92,6 +97,8 @@ let selectedBasketProduct = null;
 let basketFlowRunning = false;
 let basketQueue = [];
 let nextBasketQueueId = 1;
+let basketDailyPlans = [];
+let nextBasketDailyPlanId = 1;
 
 versionLabel.textContent = `v${chrome.runtime.getManifest().version}`;
 
@@ -242,7 +249,9 @@ function getScheduleTimestamp() {
 }
 
 function scheduleIsValid() {
-  if (getBasketPublishMode() === "now") return true;
+  const mode = getBasketPublishMode();
+  if (mode === "now") return true;
+  if (mode === "daily") return dailyPlanConfigIsValid();
   const minuteMatch = basketScheduleAt?.value.match(/T\d{2}:(\d{2})/);
   const minute = Number(minuteMatch?.[1]);
   return getScheduleTimestamp() > Date.now() && Number.isInteger(minute) && minute % 5 === 0;
@@ -258,24 +267,215 @@ function basketIntervalIsValid() {
   return Number.isInteger(minutes) && minutes >= 5 && minutes % 5 === 0;
 }
 
+function toLocalDateInputValue(date) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function getDailyPlanStartTimestamp(plan) {
+  if (!plan?.date || !/^\d{2}:\d{2}$/.test(plan.startTime || "")) return NaN;
+  return new Date(`${plan.date}T${plan.startTime}`).getTime();
+}
+
+function getDailyPlanEndTimestamp(plan) {
+  const startTimestamp = getDailyPlanStartTimestamp(plan);
+  if (!Number.isFinite(startTimestamp)) return NaN;
+  return startTimestamp + (Number(plan.clipCount) - 1) * Number(plan.intervalMinutes) * 60 * 1000;
+}
+
+function getDailyPlanValidationMessage(plan) {
+  const startTimestamp = getDailyPlanStartTimestamp(plan);
+  const clipCount = Number(plan?.clipCount);
+  const intervalMinutes = Number(plan?.intervalMinutes);
+  if (!Number.isFinite(startTimestamp)) return "กรุณาเลือกวันที่และเวลาเริ่ม";
+  if (startTimestamp <= Date.now()) return "เวลาเริ่มต้องอยู่ในอนาคต";
+  const startMinute = Number(String(plan.startTime).split(":")[1]);
+  if (!Number.isInteger(startMinute) || startMinute % 5 !== 0) {
+    return "เวลาเริ่มต้องลงท้าย 00, 05, 10…";
+  }
+  if (!Number.isInteger(clipCount) || clipCount < 1 || clipCount > MAX_BATCH_VIDEOS) {
+    return `จำนวนคลิปต้องอยู่ระหว่าง 1-${MAX_BATCH_VIDEOS}`;
+  }
+  if (!Number.isInteger(intervalMinutes) || intervalMinutes < 5 || intervalMinutes % 5 !== 0) {
+    return "ระยะห่างต้องอย่างน้อย 5 นาที และหาร 5 ลงตัว";
+  }
+  const endTimestamp = getDailyPlanEndTimestamp(plan);
+  if (toLocalDateInputValue(new Date(endTimestamp)) !== plan.date) {
+    return "เวลาคลิปสุดท้ายข้ามวัน กรุณาลดจำนวนคลิปหรือระยะห่าง";
+  }
+  return "";
+}
+
+function dailyPlanConfigIsValid() {
+  if (!basketDailyPlans.length) return false;
+  if (basketDailyPlans.some((plan) => getDailyPlanValidationMessage(plan))) return false;
+  return new Set(basketDailyPlans.map((plan) => plan.date)).size === basketDailyPlans.length;
+}
+
+function getDailyPlanSlots() {
+  if (!dailyPlanConfigIsValid()) return [];
+  const orderedPlans = [...basketDailyPlans].sort(
+    (left, right) => getDailyPlanStartTimestamp(left) - getDailyPlanStartTimestamp(right),
+  );
+  return orderedPlans.flatMap((plan) => {
+    const startTimestamp = getDailyPlanStartTimestamp(plan);
+    return Array.from({ length: Number(plan.clipCount) }, (_, index) => ({
+      planId: plan.id,
+      timestamp: startTimestamp + index * Number(plan.intervalMinutes) * 60 * 1000,
+    }));
+  });
+}
+
+function dailyPlanMatchesQueue() {
+  return dailyPlanConfigIsValid() && getDailyPlanSlots().length === basketQueue.length;
+}
+
+function queueScheduleIsValid() {
+  if (!scheduleIsValid() || !basketIntervalIsValid()) return false;
+  return getBasketPublishMode() !== "daily" || dailyPlanMatchesQueue();
+}
+
+function getQueueScheduleTimestamp(index) {
+  const mode = getBasketPublishMode();
+  if (mode === "schedule") {
+    return getScheduleTimestamp() + index * getBasketIntervalMinutes() * 60 * 1000;
+  }
+  if (mode === "daily") return getDailyPlanSlots()[index]?.timestamp ?? NaN;
+  return NaN;
+}
+
+function getTikTokPublishMode() {
+  return getBasketPublishMode() === "now" ? "now" : "schedule";
+}
+
+function createDefaultDailyPlan() {
+  const existingDates = basketDailyPlans
+    .map((plan) => new Date(`${plan.date}T00:00:00`))
+    .filter((date) => Number.isFinite(date.getTime()));
+  const date = existingDates.length
+    ? new Date(Math.max(...existingDates.map((value) => value.getTime())))
+    : new Date();
+  date.setDate(date.getDate() + 1);
+  const allocated = basketDailyPlans.reduce((total, plan) => total + Number(plan.clipCount || 0), 0);
+  const remaining = Math.max(0, basketQueue.length - allocated);
+  return {
+    id: nextBasketDailyPlanId++,
+    date: toLocalDateInputValue(date),
+    clipCount: remaining ? Math.min(10, remaining) : 10,
+    startTime: "07:00",
+    intervalMinutes: 90,
+  };
+}
+
+function renderBasketDailyPlanStatus() {
+  if (!basketDailyPlanStatus) return;
+  const allocated = basketDailyPlans.reduce((total, plan) => total + Number(plan.clipCount || 0), 0);
+  basketDailyAllocatedCount.textContent = `${allocated} ช่อง`;
+  if (!dailyPlanConfigIsValid()) {
+    const duplicateDates = new Set(basketDailyPlans.map((plan) => plan.date)).size !== basketDailyPlans.length;
+    basketDailyPlanStatus.textContent = duplicateDates
+      ? "พบวันที่ซ้ำ กรุณารวมจำนวนคลิปไว้ในแถวเดียวกัน"
+      : "กรุณาตรวจข้อมูลแผนรายวันที่มีกรอบสีแดง";
+    basketDailyPlanStatus.dataset.state = "error";
+    return;
+  }
+  if (!basketQueue.length) {
+    basketDailyPlanStatus.textContent = `เตรียมไว้ ${allocated} ช่อง · เพิ่มคลิปลงคิวเพื่อเริ่มจับคู่เวลา`;
+    basketDailyPlanStatus.dataset.state = "warning";
+    return;
+  }
+  const difference = allocated - basketQueue.length;
+  if (difference === 0) {
+    basketDailyPlanStatus.textContent = `พร้อมใช้งาน · ${basketQueue.length} คลิปตรงกับ ${allocated} ช่องเวลา`;
+    basketDailyPlanStatus.dataset.state = "success";
+  } else if (difference > 0) {
+    basketDailyPlanStatus.textContent = `ยังขาด ${difference} คลิป · มี ${allocated} ช่อง แต่คิวมี ${basketQueue.length} คลิป`;
+    basketDailyPlanStatus.dataset.state = "warning";
+  } else {
+    basketDailyPlanStatus.textContent = `ยังไม่ได้จัดเวลา ${Math.abs(difference)} คลิป · เพิ่มจำนวนคลิปหรือเพิ่มวัน`;
+    basketDailyPlanStatus.dataset.state = "error";
+  }
+}
+
+function renderBasketDailyPlans() {
+  if (!basketDailyPlanList) return;
+  basketDailyPlans.sort((left, right) =>
+    `${left.date}T${left.startTime}`.localeCompare(`${right.date}T${right.startTime}`),
+  );
+  basketDailyPlanList.replaceChildren();
+  basketDailyPlans.forEach((plan, index) => {
+    const validationMessage = getDailyPlanValidationMessage(plan);
+    const endTimestamp = getDailyPlanEndTimestamp(plan);
+    const row = document.createElement("article");
+    row.className = "basket-daily-plan-row";
+    row.dataset.state = validationMessage ? "error" : "ready";
+    row.innerHTML = `
+      <div class="basket-daily-plan-heading">
+        <span>
+          <small>DAY ${String(index + 1).padStart(2, "0")}</small>
+          <strong>${validationMessage || `${plan.clipCount} คลิป · ${plan.startTime}–${new Date(endTimestamp).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}`}</strong>
+        </span>
+        <button class="basket-daily-remove" type="button" aria-label="ลบวันที่ ${plan.date}" ${basketDailyPlans.length === 1 ? "disabled" : ""}>×</button>
+      </div>
+      <div class="basket-daily-plan-grid">
+        <label><span>วันที่โพสต์</span><input data-field="date" type="date" min="${toLocalDateInputValue(new Date())}" value="${plan.date}" /></label>
+        <label><span>จำนวนคลิป</span><input data-field="clipCount" type="number" min="1" max="${MAX_BATCH_VIDEOS}" step="1" value="${plan.clipCount}" /></label>
+        <label><span>เวลาเริ่ม</span><input data-field="startTime" type="time" step="300" value="${plan.startTime}" /></label>
+        <label><span>เว้นทุก</span><input data-field="intervalMinutes" type="number" min="5" step="5" value="${plan.intervalMinutes}" /></label>
+      </div>
+      <div class="basket-daily-plan-result" data-state="${validationMessage ? "error" : "ready"}">
+        ${validationMessage || `คลิปสุดท้ายเวลา ${new Date(endTimestamp).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} · ไม่ข้ามวัน`}
+      </div>`;
+
+    row.querySelectorAll("input[data-field]").forEach((input) => {
+      input.addEventListener("change", () => {
+        const field = input.dataset.field;
+        plan[field] = input.type === "number" ? Number(input.value) : input.value;
+        renderBasketDailyPlans();
+        updateBasketBundle();
+      });
+    });
+    row.querySelector(".basket-daily-remove")?.addEventListener("click", () => {
+      if (basketDailyPlans.length === 1) return;
+      basketDailyPlans = basketDailyPlans.filter((item) => item.id !== plan.id);
+      renderBasketDailyPlans();
+      updateBasketBundle();
+    });
+    basketDailyPlanList.appendChild(row);
+  });
+  renderBasketDailyPlanStatus();
+}
+
+function addBasketDailyPlan() {
+  basketDailyPlans.push(createDefaultDailyPlan());
+  renderBasketDailyPlans();
+  updateBasketBundle();
+}
+
 function updatePostTimeUi({ setDefault = false } = {}) {
   const mode = getBasketPublishMode();
   for (const input of basketPublishModeInputs) {
     input.closest(".post-time-option")?.classList.toggle("is-selected", input.checked);
   }
   basketScheduleField.hidden = mode !== "schedule";
+  basketDailyScheduleField.hidden = mode !== "daily";
   basketScheduleAt.required = mode === "schedule";
   if (mode === "schedule" && setDefault && !basketScheduleAt.value) {
     const defaultTime = new Date(Date.now() + 30 * 60 * 1000);
     defaultTime.setMinutes(Math.ceil(defaultTime.getMinutes() / 5) * 5, 0, 0);
     basketScheduleAt.value = toLocalDateTimeInputValue(defaultTime);
   }
+  if (mode === "daily" && !basketDailyPlans.length) {
+    basketDailyPlans.push(createDefaultDailyPlan());
+  }
+  renderBasketDailyPlans();
   updateBasketBundle();
 }
 
 function getQueueScheduleValue(index) {
-  if (getBasketPublishMode() !== "schedule") return "";
-  const timestamp = getScheduleTimestamp() + index * getBasketIntervalMinutes() * 60 * 1000;
+  if (getBasketPublishMode() === "now") return "";
+  const timestamp = getQueueScheduleTimestamp(index);
+  if (!Number.isFinite(timestamp)) return "";
   return toLocalDateTimeInputValue(new Date(timestamp));
 }
 
@@ -291,10 +491,12 @@ function renderBasketQueue() {
     const title = document.createElement("strong");
     title.textContent = `${index + 1}. ${item.file.name}`;
     const detail = document.createElement("small");
-    const scheduleText = getBasketPublishMode() === "schedule"
-      ? new Date(getScheduleTimestamp() + index * getBasketIntervalMinutes() * 60 * 1000)
-        .toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })
-      : "โพสต์ทันที";
+    const queueScheduleValue = getQueueScheduleValue(index);
+    const scheduleText = getBasketPublishMode() === "now"
+      ? "โพสต์ทันที"
+      : queueScheduleValue
+        ? new Date(queueScheduleValue).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })
+        : "ยังไม่ได้จัดเวลา";
     detail.textContent = `${item.product.name} · ${scheduleText}${item.stateText ? ` · ${item.stateText}` : ""}`;
     copy.append(title, detail);
     const remove = document.createElement("button");
@@ -312,8 +514,9 @@ function renderBasketQueue() {
   });
   basketQueueCount.textContent = `${basketQueue.length} คลิป`;
   startBasketQueueButton.disabled =
-    basketFlowRunning || !basketQueue.length || !scheduleIsValid() || !basketIntervalIsValid();
+    basketFlowRunning || !basketQueue.length || !queueScheduleIsValid();
   startBasketQueueButton.dataset.running = String(basketFlowRunning);
+  renderBasketDailyPlanStatus();
 }
 
 function closeBasketProductPicker() {
@@ -385,17 +588,17 @@ function updateBasketBundle() {
   const file = basketVideoInput?.files?.[0] || null;
   const caption = basketCaption?.value.trim() || "";
   const timingReady = scheduleIsValid() && basketIntervalIsValid();
-  const completed = [
+  const contentReady = [
     Boolean(file),
     Boolean(caption),
     Boolean(selectedBasketProduct),
-    timingReady,
-  ];
-
-  const completeCount = completed.filter(Boolean).length;
-  startBasketFlowButton.disabled = basketFlowRunning || completeCount !== 4;
+  ].every(Boolean);
+  const directTimingReady = timingReady && (
+    getBasketPublishMode() !== "daily" || getDailyPlanSlots().length === 1
+  );
+  startBasketFlowButton.disabled = basketFlowRunning || !contentReady || !directTimingReady;
   startBasketFlowButton.dataset.running = String(basketFlowRunning);
-  addBasketQueueItemButton.disabled = basketFlowRunning || completeCount !== 4;
+  addBasketQueueItemButton.disabled = basketFlowRunning || !contentReady || !timingReady;
   renderBasketQueue();
 }
 
@@ -500,6 +703,7 @@ for (const input of basketPublishModeInputs) {
 }
 basketScheduleAt?.addEventListener("input", updateBasketBundle);
 basketIntervalMinutes?.addEventListener("input", updateBasketBundle);
+addBasketDailyPlanButton?.addEventListener("click", addBasketDailyPlan);
 
 function isSupportedVideo(file) {
   return Boolean(file) && (
@@ -1038,7 +1242,7 @@ async function runBasketQueueItem(
     caption: item.caption,
     productId: item.product.id,
     productName: item.product.name,
-    publishMode: getBasketPublishMode(),
+    publishMode: getTikTokPublishMode(),
     scheduledAt,
     forceFreshUpload: true,
     queueIndex,
@@ -1052,15 +1256,14 @@ async function runBasketQueueItem(
 
 startBasketQueueButton?.addEventListener("click", async () => {
   if (!basketQueue.length || basketFlowRunning) return;
-  if (!scheduleIsValid() || !basketIntervalIsValid()) {
-    basketStatus.textContent = "กรุณาตรวจสอบเวลาเริ่มต้นและระยะห่างของแต่ละคลิป";
+  if (!queueScheduleIsValid()) {
+    basketStatus.textContent = getBasketPublishMode() === "daily"
+      ? "จำนวนช่องในแผนรายวันต้องตรงกับจำนวนคลิป และทุกเวลาต้องถูกต้องก่อนเริ่ม"
+      : "กรุณาตรวจสอบเวลาเริ่มต้นและระยะห่างของแต่ละคลิป";
     basketStatus.dataset.state = "error";
     return;
   }
 
-  const publishMode = getBasketPublishMode();
-  const baseTimestamp = getScheduleTimestamp();
-  const intervalMs = getBasketIntervalMinutes() * 60 * 1000;
   const queueStartedAt = Date.now();
   let queueTikTokTabId = null;
   basketFlowRunning = true;
@@ -1073,9 +1276,7 @@ startBasketQueueButton?.addEventListener("click", async () => {
       renderBasketQueue();
       basketStatus.textContent = `กำลังโพสต์คลิป ${index + 1}/${basketQueue.length}: ${item.file.name}`;
       basketStatus.dataset.state = "working";
-      const scheduledAt = publishMode === "schedule"
-        ? toLocalDateTimeInputValue(new Date(baseTimestamp + index * intervalMs))
-        : "";
+      const scheduledAt = getQueueScheduleValue(index);
       try {
         const response = await runBasketQueueItem(
           item,
@@ -1136,12 +1337,19 @@ startBasketFlowButton?.addEventListener("click", async () => {
     return;
   }
 
-  const publishMode = getBasketPublishMode();
-  const scheduledAt = publishMode === "schedule" ? basketScheduleAt.value : "";
+  const selectedPublishMode = getBasketPublishMode();
+  if (selectedPublishMode === "daily" && getDailyPlanSlots().length !== 1) {
+    basketStatus.textContent = "โหมดรายวันสำหรับหลายคลิป กรุณาเพิ่มคลิปลงคิวแล้วกดเริ่มโพสต์ทุกคลิปตามคิว";
+    basketStatus.dataset.state = "error";
+    basketDailyScheduleField.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+  const publishMode = getTikTokPublishMode();
+  const scheduledAt = getQueueScheduleValue(0);
   if (!scheduleIsValid()) {
     basketStatus.textContent = "กรุณาเลือกเวลาในอนาคต โดยนาทีต้องลงท้าย 00, 05, 10…";
     basketStatus.dataset.state = "error";
-    basketScheduleAt.focus();
+    if (selectedPublishMode === "schedule") basketScheduleAt.focus();
     return;
   }
 
