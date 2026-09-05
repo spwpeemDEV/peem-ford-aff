@@ -820,23 +820,89 @@ async function configureTikTokPostTime(tabId, publishMode, scheduledAt) {
     );
   }
 
+  const scheduleDateMatches = (actualValue, expectedValue) => {
+    const actual = String(actualValue || "").trim();
+    const expectedMatch = String(expectedValue || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!actual || !expectedMatch) return false;
+    const [, year, month, day] = expectedMatch;
+    const buddhistYear = String(Number(year) + 543);
+    const normalizedActual = actual.replace(/[.]/g, "/").replace(/-/g, "/");
+    const shortMonth = String(Number(month));
+    const shortDay = String(Number(day));
+    const parsedTimestamp = Date.parse(actual);
+    if (Number.isFinite(parsedTimestamp)) {
+      const parsedDate = new Date(parsedTimestamp);
+      if (
+        parsedDate.getFullYear() === Number(year)
+        && parsedDate.getMonth() + 1 === Number(month)
+        && parsedDate.getDate() === Number(day)
+      ) {
+        return true;
+      }
+    }
+    const variants = [
+      `${year}/${month}/${day}`,
+      `${month}/${day}/${year}`,
+      `${day}/${month}/${year}`,
+      `${year}/${shortMonth}/${shortDay}`,
+      `${shortMonth}/${shortDay}/${year}`,
+      `${shortDay}/${shortMonth}/${year}`,
+      `${buddhistYear}/${month}/${day}`,
+      `${month}/${day}/${buddhistYear}`,
+      `${day}/${month}/${buddhistYear}`,
+      `${buddhistYear}/${shortMonth}/${shortDay}`,
+      `${shortMonth}/${shortDay}/${buddhistYear}`,
+      `${shortDay}/${shortMonth}/${buddhistYear}`,
+    ];
+    return actual.includes(`${year}-${month}-${day}`)
+      || variants.some((variant) => normalizedActual.includes(variant));
+  };
+
   const currentDate = await chrome.tabs.sendMessage(tabId, {
     type: "READ_TIKTOK_SCHEDULE_VALUE",
     kind: "date",
   });
-  if (String(currentDate?.value || "").trim() !== dateValue) {
+  if (!scheduleDateMatches(currentDate?.value, dateValue)) {
     await findAndClickTikTokTarget(
       tabId,
       "FIND_TIKTOK_SCHEDULE_CONTROL",
       30 * 1000,
       { kind: "date" },
     );
-    await findAndClickTikTokTarget(
-      tabId,
-      "FIND_TIKTOK_DATE_OPTION",
-      30 * 1000,
-      { dateValue },
-    );
+    let selectedDate = false;
+    for (let attempt = 0; attempt < 14; attempt += 1) {
+      const target = await findAndClickTikTokTarget(
+        tabId,
+        "FIND_TIKTOK_DATE_OPTION",
+        30 * 1000,
+        { dateValue },
+      );
+      if (target.action === "date") {
+        selectedDate = true;
+        break;
+      }
+      if (!String(target.action || "").startsWith("navigate-")) {
+        throw new Error(`ไม่สามารถเลือกวันที่ ${dateValue} ในปฏิทิน TikTok`);
+      }
+    }
+    if (!selectedDate) {
+      throw new Error(`ปฏิทิน TikTok เลื่อนไปยังวันที่ ${dateValue} ไม่สำเร็จ`);
+    }
+
+    let appliedDate = null;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      appliedDate = await chrome.tabs.sendMessage(tabId, {
+        type: "READ_TIKTOK_SCHEDULE_VALUE",
+        kind: "date",
+      });
+      if (scheduleDateMatches(appliedDate?.value, dateValue)) break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    if (!scheduleDateMatches(appliedDate?.value, dateValue)) {
+      throw new Error(
+        `TikTok ไม่ยืนยันวันที่ ${dateValue} (ค่าปัจจุบัน: ${String(appliedDate?.value || "ว่าง")})`,
+      );
+    }
   }
   return true;
 }

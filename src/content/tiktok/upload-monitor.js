@@ -1109,6 +1109,8 @@
           if (element.type === "time") score += 800;
         } else {
           if (/^\d{4}-\d{2}-\d{2}$/.test(value)) score += 1000;
+          if (/^\d{1,2}[\/.\-]\d{1,2}[\/.\-](?:\d{2}|\d{4})$/.test(value)) score += 1000;
+          if (/[a-zก-๙]{3,}\s+\d{1,2}|\d{1,2}\s+[a-zก-๙]{3,}/i.test(value)) score += 900;
           if (/วันที่|date/i.test(identity)) score += 650;
           if (element.type === "date") score += 800;
         }
@@ -1116,6 +1118,15 @@
         for (let depth = 0; container && depth < 8; depth += 1) {
           const text = normalize(container.innerText || container.textContent);
           if (/เวลาโพสต์|post time/i.test(text)) score += 600 - depth * 35;
+          const containerIdentity = normalize(`${container.className || ""} ${container.id || ""}`);
+          if (/scheduled-picker/i.test(containerIdentity)) {
+            const pickerInputs = [...container.querySelectorAll(
+              'input:not([type="hidden"]):not([type="radio"]), [role="combobox"] input',
+            )].filter(isVisible);
+            const inputIndex = pickerInputs.indexOf(element);
+            if (kind === "time" && inputIndex === 0) score += 850;
+            if (kind === "date" && inputIndex === 1) score += 850;
+          }
           container = container.parentElement;
         }
         return { element, score };
@@ -1186,17 +1197,54 @@
     return candidates[0].element;
   }
 
-  function findCalendarDateCell(dateValue) {
-    const match = String(dateValue || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!match) return null;
-    const year = match[1];
-    const day = String(Number(match[3]));
+  const calendarMonthNames = [
+    ["january", "jan", "มกราคม", "ม.ค"],
+    ["february", "feb", "กุมภาพันธ์", "ก.พ"],
+    ["march", "mar", "มีนาคม", "มี.ค"],
+    ["april", "apr", "เมษายน", "เม.ย"],
+    ["may", "พฤษภาคม", "พ.ค"],
+    ["june", "jun", "มิถุนายน", "มิ.ย"],
+    ["july", "jul", "กรกฎาคม", "ก.ค"],
+    ["august", "aug", "สิงหาคม", "ส.ค"],
+    ["september", "sep", "sept", "กันยายน", "ก.ย"],
+    ["october", "oct", "ตุลาคม", "ต.ค"],
+    ["november", "nov", "พฤศจิกายน", "พ.ย"],
+    ["december", "dec", "ธันวาคม", "ธ.ค"],
+  ];
+
+  function parseCalendarHeader(text) {
+    const rawText = normalize(text).toLowerCase();
+    const comparableText = rawText.replace(/[.]/g, "");
+    let month = null;
+    for (let index = 0; index < calendarMonthNames.length; index += 1) {
+      const found = calendarMonthNames[index].some((name) =>
+        comparableText.includes(name.toLowerCase().replace(/[.]/g, "")),
+      );
+      if (found) {
+        month = index + 1;
+        break;
+      }
+    }
+    if (!month) {
+      const numericMatch = rawText.match(/(?:^|\D)(1[0-2]|0?[1-9])\s*[\/.\-]\s*(\d{4})(?:\D|$)/)
+        || rawText.match(/(?:^|\D)(\d{4})\s*[\/.\-]\s*(1[0-2]|0?[1-9])(?:\D|$)/);
+      if (numericMatch) {
+        month = Number(numericMatch[1].length === 4 ? numericMatch[2] : numericMatch[1]);
+      }
+    }
+    const yearMatch = rawText.match(/(?:^|\D)((?:19|20|25)\d{2})(?:\D|$)/);
+    let year = yearMatch ? Number(yearMatch[1]) : null;
+    if (year && year >= 2400) year -= 543;
+    return { month, year };
+  }
+
+  function findCalendarPanel(year) {
     const namedPanels = [...document.querySelectorAll(
-      '[class*="calendar" i], [class*="date-picker" i], [class*="datepicker" i], [class*="picker-panel" i], [role="grid"]',
+      'div.calendar-wrapper, [class*="calendar" i], [class*="date-picker" i], [class*="datepicker" i], [class*="picker-panel" i], [role="grid"]',
     )].filter((element) => {
       if (!isVisible(element)) return false;
       const rect = element.getBoundingClientRect();
-      return rect.width >= 220 && rect.width <= 650 && rect.height >= 180;
+      return rect.width >= 180 && rect.width <= 700 && rect.height >= 160;
     });
 
     // TikTok sometimes renders the calendar with generated class names and plain
@@ -1209,7 +1257,7 @@
         return false;
       }
       const text = normalize(element.innerText || element.textContent);
-      if (!text.includes(year)) return false;
+      if (!text.includes(String(year)) && !element.querySelector('[class~="day"]')) return false;
       const dateTokens = text.match(/(?:^|\s)(?:[1-9]|[12]\d|3[01])(?=\s|$)/g) || [];
       return dateTokens.length >= 20;
     });
@@ -1220,14 +1268,89 @@
         const rightRect = right.getBoundingClientRect();
         const leftText = normalize(left.innerText || left.textContent);
         const rightText = normalize(right.innerText || right.textContent);
-        const leftHasYear = leftText.includes(year) ? 1 : 0;
-        const rightHasYear = rightText.includes(year) ? 1 : 0;
+        const leftIsWrapper = left.matches("div.calendar-wrapper") ? 1 : 0;
+        const rightIsWrapper = right.matches("div.calendar-wrapper") ? 1 : 0;
+        if (leftIsWrapper !== rightIsWrapper) return rightIsWrapper - leftIsWrapper;
+        const leftHasYear = leftText.includes(String(year)) ? 1 : 0;
+        const rightHasYear = rightText.includes(String(year)) ? 1 : 0;
         if (leftHasYear !== rightHasYear) return rightHasYear - leftHasYear;
         return leftRect.width * leftRect.height - rightRect.width * rightRect.height;
-      })[0] || document;
+      })[0] || null;
+    return panel;
+  }
+
+  function findCalendarNavigation(panel, direction) {
+    if (!panel) return null;
+    const candidates = [...panel.querySelectorAll(
+      'button, [role="button"], span.arrow, [class*="arrow" i], [class*="chevron" i]',
+    )]
+      .filter((element) => {
+        if (!isVisible(element)) return false;
+        const rect = element.getBoundingClientRect();
+        return rect.width >= 12 && rect.width <= 80 && rect.height >= 12 && rect.height <= 80;
+      })
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const identity = normalize(
+          `${element.className || ""} ${element.getAttribute("aria-label") || ""} ${element.getAttribute("title") || ""} ${element.textContent || ""}`,
+        ).toLowerCase();
+        let score = 0;
+        if (/arrow|chevron/.test(identity)) score += 500;
+        if (direction === "next" && /next|right|ถัดไป|เดือนถัดไป/.test(identity)) score += 1200;
+        if (direction === "previous" && /prev|previous|left|ก่อนหน้า|เดือนก่อน/.test(identity)) score += 1200;
+        if (direction === "next" && /prev|previous|left|ก่อนหน้า|เดือนก่อน/.test(identity)) score -= 1600;
+        if (direction === "previous" && /next|right|ถัดไป|เดือนถัดไป/.test(identity)) score -= 1600;
+        return { element, score, x: rect.left + rect.width / 2 };
+      });
+    if (!candidates.length) return null;
+    candidates.sort((left, right) => {
+      if (left.score !== right.score) return right.score - left.score;
+      return direction === "next" ? right.x - left.x : left.x - right.x;
+    });
+    return candidates[0].score > 0 ? candidates[0].element : null;
+  }
+
+  function findCalendarTarget(dateValue) {
+    const match = String(dateValue || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return null;
+    const targetYear = Number(match[1]);
+    const targetMonth = Number(match[2]);
+    const day = String(Number(match[3]));
+    const panel = findCalendarPanel(targetYear);
+    if (!panel) return null;
+
+    const exactSelectors = [
+      `[data-date="${dateValue}"]`,
+      `[data-value="${dateValue}"]`,
+      `[title*="${dateValue}"]`,
+      `[aria-label*="${dateValue}"]`,
+    ].join(",");
+    const exactCell = [...panel.querySelectorAll(exactSelectors)].find(isVisible);
+    if (exactCell) return { element: exactCell, action: "date" };
+
+    const monthTitle = panel.querySelector(
+      '.month-title, [class*="month-title" i], [class*="calendar-header" i], [class*="picker-header" i]',
+    );
+    const header = parseCalendarHeader(monthTitle?.textContent || "");
+    if (header.month) {
+      let displayedYear = header.year;
+      if (!displayedYear) {
+        const now = new Date();
+        displayedYear = now.getFullYear();
+        if (now.getMonth() >= 10 && header.month <= 2) displayedYear += 1;
+        if (now.getMonth() <= 1 && header.month >= 11) displayedYear -= 1;
+      }
+      const displayedMonthKey = displayedYear * 12 + header.month - 1;
+      const targetMonthKey = targetYear * 12 + targetMonth - 1;
+      if (displayedMonthKey !== targetMonthKey) {
+        const direction = targetMonthKey > displayedMonthKey ? "next" : "previous";
+        const arrow = findCalendarNavigation(panel, direction);
+        return arrow ? { element: arrow, action: `navigate-${direction}` } : null;
+      }
+    }
 
     const semanticCandidates = [...panel.querySelectorAll(
-      '[role="gridcell"], td, button, [class*="picker-cell" i], [class*="date-value" i], [class*="picker-date" i]',
+      'span.day.valid, [role="gridcell"], td, button, [class*="picker-cell" i], [class*="date-value" i], [class*="picker-date" i]',
     )];
     const plainTextCandidates = [...panel.querySelectorAll("*")].filter((element) => {
       if (element.childElementCount > 0) return false;
@@ -1242,7 +1365,7 @@
       return identity.includes(dateValue) || text === day;
     });
 
-    return candidates
+    const selectedCandidate = candidates
       .map((element) => {
         const rect = element.getBoundingClientRect();
         const identity = normalize(
@@ -1250,8 +1373,10 @@
         );
         let score = 0;
         if (identity.includes(dateValue)) score += 2200;
-        if (/in-view|current-month|cell-in/i.test(identity)) score += 850;
-        if (/disabled|out-view|prev-month|next-month/i.test(identity)) score -= 1100;
+        if (element.matches("span.day.valid")) score += 1800;
+        if (/in-view|current-month|cell-in|\bvalid\b/i.test(identity)) score += 850;
+        if (/disabled|invalid|out-view|prev-month|next-month/i.test(identity)) score -= 1800;
+        if (element.getAttribute("aria-disabled") === "true") score -= 1800;
         if (element.matches('[role="gridcell"], td')) score += 350;
         if (rect.width >= 24 && rect.width <= 70 && rect.height >= 24 && rect.height <= 70) score += 250;
         let parent = element.parentElement;
@@ -1289,7 +1414,10 @@
         return { element: clickElement, score };
       })
       .filter((candidate) => candidate.score >= 600)
-      .sort((left, right) => right.score - left.score)[0]?.element || null;
+      .sort((left, right) => right.score - left.score)[0];
+    return selectedCandidate
+      ? { element: selectedCandidate.element, action: "date" }
+      : null;
   }
 
   function readScheduleValue(kind) {
@@ -1300,9 +1428,10 @@
   async function prepareDateTarget(dateValue, timeoutMs) {
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
-      const cell = findCalendarDateCell(dateValue);
+      const target = findCalendarTarget(dateValue);
+      const cell = target?.element;
       if (cell) {
-        cell.scrollIntoView({ behavior: "auto", block: "center", inline: "center" });
+        cell.scrollIntoView({ behavior: "auto", block: "nearest", inline: "nearest" });
         await delay(180);
         const rect = cell.getBoundingClientRect();
         const x = rect.left + rect.width / 2;
@@ -1312,7 +1441,7 @@
           topElement &&
           (topElement === cell || cell.contains(topElement) || topElement.contains(cell))
         ) {
-          return { ok: true, x, y, text: elementText(cell) };
+          return { ok: true, x, y, text: elementText(cell), action: target.action };
         }
       }
       await delay(300);

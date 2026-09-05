@@ -29,6 +29,17 @@
           <span>สร้างคลิป</span>
         </button>
         <button
+          id="openProductSyncPage"
+          class="panel-tab"
+          type="button"
+          data-panel-target="productSyncPage"
+          aria-controls="productSyncPage"
+          aria-selected="false"
+        >
+          <span class="panel-tab-icon" aria-hidden="true">↻</span>
+          <span>ดึงสินค้า</span>
+        </button>
+        <button
           id="openBasketPage"
           class="panel-tab"
           type="button"
@@ -217,18 +228,12 @@
       </div>
 
       <section
-        id="basketPage"
-        class="sidebar-page basket-page"
+        id="productSyncPage"
+        class="sidebar-page product-sync-page"
         data-panel-page
         hidden
-        aria-label="ปักตะกร้าสินค้า"
+        aria-label="ดึงสินค้าจาก TikTok"
       >
-        <button id="backToCreation" class="page-back-button" type="button">
-          <span aria-hidden="true">←</span>
-          กลับไปหน้าสร้างคลิป
-        </button>
-
-        <!-- ซิงก์สินค้าอยู่บนสุดของหน้าปักตะกร้า -->
         <section id="productSyncCard" class="workflow-card product-sync-card" aria-label="ซิงก์ข้อมูล TikTok">
           <div class="card-heading">
             <div>
@@ -238,58 +243,35 @@
             <span id="productResultCount" class="product-result-count">0 สินค้า</span>
           </div>
 
-          <p class="product-sync-hint">
-            ดึงรายการจาก TikTok แล้วคลิกสินค้าเพื่อผูก Product ID เข้ากับวิดีโอ
-          </p>
+          <button id="openTikTokStudio" class="page-back-button product-sync-open-tiktok-button" type="button">
+            ไปที่หน้า TikTok Studio
+            <span aria-hidden="true">↗</span>
+          </button>
 
           <div class="automation-form">
-            <label class="field compact-field" for="syncMaxPages">
-              <span>
-                <strong>จำนวนหน้าที่ต้องการดึง</strong>
-                <small>ระบุจำนวนหน้า (1-100)</small>
-              </span>
-              <span class="input-shell" style="width: 80px; text-align: center">
+            <div class="sync-pages-controls">
+              <label class="field compact-field" for="syncMaxPages">
+                <span>
+                  <strong>จำนวนหน้าที่ต้องการดึง</strong>
+                  <small id="syncMaxPagesHint">ระบุจำนวนหน้า (1-100)</small>
+                </span>
                 <input
-                  type="number"
+                  class="sync-pages-input"
+                  type="text"
+                  inputmode="numeric"
+                  autocomplete="off"
                   id="syncMaxPages"
                   value="5"
-                  min="1"
-                  max="100"
-                  style="
-                    width: 100%;
-                    background: transparent;
-                    border: none;
-                    color: #fff;
-                    text-align: center;
-                    font-size: 14px;
-                    outline: none;
-                  "
+                  maxlength="3"
+                  aria-describedby="syncMaxPagesHint"
                 />
-              </span>
-            </label>
+              </label>
+              <button id="syncAllPagesBtn" class="sync-all-pages-button" type="button">
+                ดึงทุกหน้า
+              </button>
+            </div>
 
-            <div id="tiktokSyncStatus" class="tiktok-sync-status" hidden></div>
-
-            <label id="productSearchField" class="product-search-field" for="syncedProductSearch" hidden>
-              <span aria-hidden="true">⌕</span>
-              <input
-                id="syncedProductSearch"
-                type="search"
-                autocomplete="off"
-                placeholder="ค้นหาชื่อสินค้า หรือ Product ID"
-              />
-            </label>
-
-            <div
-              id="tiktokIdOutput"
-              class="synced-product-list"
-              role="listbox"
-              aria-label="สินค้าที่ดึงจาก TikTok"
-              hidden
-            ></div>
-          </div>
-
-          <div class="action-dock" style="margin-top: 16px">
+          <div class="action-dock product-sync-actions">
             <button
               id="syncTiktokBtn"
               class="primary-button"
@@ -314,20 +296,52 @@
 
             <button
               id="clearSyncBtn"
-              class="cancel-button"
+              class="cancel-button clear-sync-button"
               type="button"
-              style="
-                flex: 0 0 auto;
-                background: transparent;
-                border: 1px solid #3f3f46;
-                color: #d4d4d8;
-              "
+              hidden
               title="ล้างรายการทั้งหมด"
             >
-              <span>ล้าง</span>
+              <span>ล้างรายการสินค้า</span>
             </button>
           </div>
+
+          <div id="tiktokSyncStatus" class="tiktok-sync-status" hidden></div>
+          <div id="tiktokSyncToast" class="sync-toast" role="status" aria-live="polite" hidden></div>
+
+          <label id="productSearchField" class="product-search-field" for="syncedProductSearch" hidden>
+            <span aria-hidden="true">⌕</span>
+            <input
+              id="syncedProductSearch"
+              type="search"
+              autocomplete="off"
+              placeholder="ค้นหาชื่อสินค้า หรือ Product ID"
+            />
+          </label>
+
+            <div
+              id="tiktokIdOutput"
+              class="synced-product-list"
+              role="list"
+              aria-label="สินค้าที่ดึงจาก TikTok"
+              hidden
+            ></div>
+          </div>
+
         </section>
+
+      </section>
+
+      <section
+        id="basketPage"
+        class="sidebar-page basket-page"
+        data-panel-page
+        hidden
+        aria-label="ปักตะกร้าสินค้า"
+      >
+        <button id="backToCreation" class="page-back-button" type="button">
+          <span aria-hidden="true">←</span>
+          กลับไปหน้าสร้างคลิป
+        </button>
 
         <div class="basket-form-card">
           <section class="basket-video-batch-section" aria-labelledby="basketVideoBatchTitle">
